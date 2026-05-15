@@ -6,7 +6,9 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from ..db import get_session
-from ..models import FavoriteItem
+from ..errors import APIError
+from ..models import FavoriteItem, NotificationSubscription
+from ..schemas import SubscribeRequest
 from ..services import (
     assert_product_exists,
     demo_metadata,
@@ -84,5 +86,59 @@ def delete_favorite(
     current_user_id = require_user_id(user_id, x_user_id)
     assert_product_exists(session, product_id)
     session.execute(delete(FavoriteItem).where(FavoriteItem.user_id == current_user_id, FavoriteItem.product_id == product_id))
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/api/v1/favorites/{product_id}/subscribe", status_code=status.HTTP_201_CREATED)
+def subscribe_to_product(
+    product_id: str,
+    payload: SubscribeRequest,
+    user_id: str | None = Query(default=None),
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    session: Session = Depends(get_session),
+) -> dict:
+    current_user_id = require_user_id(user_id, x_user_id)
+    product = assert_product_exists(session, product_id)
+    existing = session.scalar(
+        select(NotificationSubscription).where(
+            NotificationSubscription.user_id == current_user_id,
+            NotificationSubscription.product_id == product_id,
+        )
+    )
+    if existing:
+        raise APIError(409, "SUBSCRIPTION_ALREADY_EXISTS", "Subscription already exists")
+    subscription = NotificationSubscription(
+        id=make_id(),
+        user_id=current_user_id,
+        product_id=product_id,
+        notify_on=payload.notify_on,
+        created_at=now_utc(),
+    )
+    session.add(subscription)
+    session.commit()
+    return {
+        "id": subscription.id,
+        "product": serialize_product_for_cart(product),
+        "notify_on": subscription.notify_on,
+        "created_at": subscription.created_at.isoformat(),
+    }
+
+
+@router.delete("/api/v1/favorites/{product_id}/subscribe", status_code=status.HTTP_204_NO_CONTENT)
+def unsubscribe_from_product(
+    product_id: str,
+    user_id: str | None = Query(default=None),
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    session: Session = Depends(get_session),
+) -> Response:
+    current_user_id = require_user_id(user_id, x_user_id)
+    assert_product_exists(session, product_id)
+    session.execute(
+        delete(NotificationSubscription).where(
+            NotificationSubscription.user_id == current_user_id,
+            NotificationSubscription.product_id == product_id,
+        )
+    )
     session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
