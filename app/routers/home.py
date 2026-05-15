@@ -1,17 +1,26 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends, Header, status
+from fastapi import APIRouter, Depends, Header, Query, status
 from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db import get_session
 from ..errors import APIError
-from ..models import Banner, BannerEvent, BannerEventType
+from ..models import Banner, BannerEvent, BannerEventType, Collection, CollectionProduct
 from ..schemas import BannerEventsRequest
-from ..services import demo_metadata, make_id, now_utc
+from ..services import (
+    demo_metadata,
+    get_collection_by_slug_or_id,
+    get_product_or_404,
+    make_id,
+    now_utc,
+    product_is_visible,
+    serialize_collection,
+    serialize_product_for_cart,
+)
 
 
 router = APIRouter(tags=["home"])
@@ -73,3 +82,48 @@ def post_banner_events(
         )
     session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/api/v1/main/collections")
+def list_collections(
+    limit: int = Query(default=10, ge=1, le=50),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_session),
+) -> dict:
+    today = date.today()
+    stmt = select(Collection).where(Collection.is_active.is_(True), Collection.start_date <= today).order_by(Collection.priority.asc())
+    collections = list(session.scalars(stmt).all())
+    sliced = collections[offset : offset + limit]
+    return {
+        "metadata": {"total_count": len(collections), "limit": limit, "offset": offset},
+        "collections": [serialize_collection(collection, product_count=len(collection.products)) for collection in sliced],
+    }
+
+
+@router.get("/api/v1/collections/{collection_ref}/products")
+def get_collection_products(
+    collection_ref: str,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_session),
+) -> dict:
+    collection = get_collection_by_slug_or_id(session, collection_ref)
+    links = list(
+        session.scalars(
+            select(CollectionProduct).where(CollectionProduct.collection_id == collection.id).order_by(CollectionProduct.ordering.asc())
+        ).all()
+    )
+    unavailable_ids = []
+    items = []
+    for link in links:
+        product = get_product_or_404(session, link.product_id)
+        if product_is_visible(product):
+            items.append(serialize_product_for_cart(product))
+        else:
+            unavailable_ids.append(product.id)
+    return {
+        "collection": serialize_collection(collection, product_count=len(items)),
+        "total_products": len(items),
+        "items": items[offset : offset + limit],
+        "unavailable_ids": unavailable_ids,
+    }
