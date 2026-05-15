@@ -12,7 +12,7 @@ from .db import engine, SessionLocal
 from .errors import install_error_handlers
 from .middleware import RequestContextMiddleware
 from .models import Base
-from .routers import catalog, favorites, system
+from .routers import cart, catalog, favorites, system
 from .seed import seed_database
 from .services import demo_metadata
 
@@ -42,6 +42,7 @@ install_error_handlers(app)
 app.include_router(system.router)
 app.include_router(catalog.router)
 app.include_router(favorites.router)
+app.include_router(cart.router)
 
 
 @app.on_event("startup")
