@@ -9,7 +9,15 @@ from ..db import get_session
 from ..errors import APIError
 from ..models import Order, OrderStatus
 from ..schemas import CancelOrderRequest, CheckoutRequest
-from ..services import build_order_list_response, cancel_order, checkout_cart, require_user_id, serialize_order
+from ..services import (
+    build_order_list_response,
+    cancel_order,
+    checkout_cart,
+    mark_order_delivered,
+    require_service_key,
+    require_user_id,
+    serialize_order,
+)
 
 
 router = APIRouter(tags=["orders"])
@@ -71,3 +79,20 @@ def cancel_existing_order(
         raise APIError(404, "ORDER_NOT_FOUND", "Order not found")
     cancelled = cancel_order(session, order, payload.reason)
     return serialize_order(cancelled)
+
+
+@router.post("/api/v1/orders/{order_id}/deliver")
+def mark_existing_order_delivered(
+    order_id: str,
+    x_service_key: str | None = Header(default=None, alias="X-Service-Key"),
+    session: Session = Depends(get_session),
+) -> dict:
+    require_service_key(x_service_key)
+    stmt = select(Order).options(selectinload(Order.items)).where(Order.id == order_id)
+    order = session.scalar(stmt)
+    if order is None:
+        raise APIError(404, "ORDER_NOT_FOUND", "Order not found")
+    delivered, fulfill_sent = mark_order_delivered(session, order)
+    payload = serialize_order(delivered)
+    payload["fulfill_sent"] = fulfill_sent
+    return payload
