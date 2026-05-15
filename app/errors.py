@@ -1,8 +1,9 @@
 import logging
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 
 
 logger = logging.getLogger("neomarket")
@@ -29,7 +30,9 @@ def install_error_handlers(app: FastAPI) -> None:
     async def validation_error_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
         return JSONResponse(
             status_code=422,
-            content={"code": "VALIDATION_ERROR", "message": "Request validation failed", "details": exc.errors()},
+            content=jsonable_encoder(
+                {"code": "VALIDATION_ERROR", "message": "Request validation failed", "details": exc.errors()}
+            ),
         )
 
     @app.exception_handler(Exception)
