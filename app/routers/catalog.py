@@ -7,6 +7,7 @@ from ..db import get_session
 from ..errors import APIError
 from ..services import (
     build_facets_response,
+    build_similar_products,
     demo_metadata,
     fetch_b2b_catalog,
     fetch_b2b_product_card,
@@ -14,11 +15,13 @@ from ..services import (
     get_category_or_404,
     get_category_products,
     get_product_by_slug_or_id,
+    load_all_products,
     parse_filters,
     product_is_visible,
     product_matches_filters,
     search_products,
     serialize_product_for_catalog,
+    serialize_product_for_cart,
     serialize_product_short,
     sort_products,
 )
@@ -84,3 +87,16 @@ def get_product(
     if not product_is_visible(product):
         raise APIError(404, "PRODUCT_NOT_FOUND", "Product not found")
     return serialize_product_for_catalog(product)
+
+
+@router.get("/api/v1/products/{id}/similar")
+def get_similar_products(
+    id: str,
+    limit: int = Query(default=8, ge=1, le=50),
+    session: Session = Depends(get_session),
+) -> dict:
+    product = get_product_by_slug_or_id(session, id)
+    if not product_is_visible(product):
+        raise APIError(404, "PRODUCT_NOT_FOUND", "Product not found")
+    similar = build_similar_products(product, load_all_products(session), limit)
+    return {"items": [serialize_product_for_cart(item) for item in similar], "total": len(similar)}
