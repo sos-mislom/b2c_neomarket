@@ -1,0 +1,12 @@
+.git
+.venv
+.venv-b2c
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.mypy_cache
+.pytest_cache
+.ruff_cache
+pgdata
+neomarket-smoke.db
