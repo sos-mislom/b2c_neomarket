@@ -4,16 +4,21 @@ from fastapi import APIRouter, Depends, Header, Query, Request
 from sqlalchemy.orm import Session
 
 from ..db import get_session
+from ..errors import APIError
 from ..services import (
     build_facets_response,
     demo_metadata,
     fetch_b2b_catalog,
+    fetch_b2b_product_card,
     get_cart_product_ids,
     get_category_or_404,
     get_category_products,
+    get_product_by_slug_or_id,
     parse_filters,
+    product_is_visible,
     product_matches_filters,
     search_products,
+    serialize_product_for_catalog,
     serialize_product_short,
     sort_products,
 )
@@ -64,3 +69,18 @@ def get_facets(
     products = get_category_products(session, category_id)
     filters = parse_filters(request.query_params)
     return build_facets_response(products, filters, category_id)
+
+
+@router.get("/api/v1/products/{id}")
+def get_product(
+    id: str,
+    session: Session = Depends(get_session),
+) -> dict:
+    b2b_product = fetch_b2b_product_card(id)
+    if b2b_product is not None:
+        return b2b_product
+
+    product = get_product_by_slug_or_id(session, id)
+    if not product_is_visible(product):
+        raise APIError(404, "PRODUCT_NOT_FOUND", "Product not found")
+    return serialize_product_for_catalog(product)
