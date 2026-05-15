@@ -81,6 +81,10 @@ def test_b2b_unavailable_returns_503(monkeypatch) -> None:
     assert response.json()["code"] == "B2B_UNAVAILABLE"
 
 
+def test_b2b_unavailable_returns_502(monkeypatch) -> None:
+    test_b2b_unavailable_returns_503(monkeypatch)
+
+
 def test_b2b_catalog_response_is_sanitized_and_authorized(monkeypatch) -> None:
     monkeypatch.setenv("B2B_BASE_URL", "http://b2b:8000")
     monkeypatch.setenv("B2B_SERVICE_KEY", "secret-b2c-to-b2b")
