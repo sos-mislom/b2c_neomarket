@@ -73,6 +73,7 @@ RESERVED_QUERY_KEYS = {
     "search",
     "category_id",
     "filters",
+    "filter",
     "include_product_count",
     "lang",
     "category",
@@ -257,7 +258,10 @@ def serialize_store(store: Store | None) -> dict | None:
 
 def serialize_images(items, order_field: str = "ordering") -> list[dict]:
     ordered = sorted(items, key=lambda item: getattr(item, order_field))
-    return [{"url": item.url, "order": getattr(item, order_field)} for item in ordered]
+    return [
+        {"id": str(getattr(item, "id")), "url": item.url, "ordering": getattr(item, order_field)}
+        for item in ordered
+    ]
 
 
 def serialize_characteristics(items) -> list[dict]:
@@ -268,11 +272,13 @@ def normalize_b2c_images(images: list[dict | str] | None) -> list[dict]:
     normalized = []
     for index, image in enumerate(images or []):
         if isinstance(image, str):
-            normalized.append({"url": image, "ordering": index})
+            normalized.append({"id": image, "url": image, "ordering": index})
             continue
         item = dict(image)
         if "ordering" not in item and "order" in item:
             item["ordering"] = item.pop("order")
+        item.setdefault("ordering", index)
+        item.setdefault("id", item.get("url", f"image-{index}"))
         normalized.append(item)
     return normalized
 
@@ -303,6 +309,32 @@ def sanitize_b2b_product_card(payload: dict) -> dict:
     return product
 
 
+def sanitize_b2b_catalog_item(payload: dict) -> dict:
+    product = sanitize_b2b_product_card(payload)
+    skus = product.get("skus") or []
+    prices = [
+        int(sku.get("price_cents", sku.get("price")))
+        for sku in skus
+        if sku.get("price_cents", sku.get("price")) is not None
+    ]
+    return {
+        "id": product.get("id"),
+        "slug": product.get("slug"),
+        "name": product.get("name") or product.get("title"),
+        "min_price": int(product.get("min_price", min(prices) if prices else 0)),
+        "has_stock": bool(
+            product.get("has_stock", any(sku.get("in_stock") or sku.get("active_quantity", 0) > 0 for sku in skus))
+        ),
+        "images": normalize_b2c_images(product.get("images")),
+        "store": product.get("store"),
+        "brand": product.get("brand"),
+        "rating": product.get("rating"),
+        "popularity": product.get("popularity"),
+        "discount_percent": product.get("discount_percent", 0),
+        "default_sku_id": product.get("default_sku_id") or (skus[0].get("id") if skus else None),
+    }
+
+
 def fetch_b2b_catalog(query_params) -> dict | None:
     settings = get_settings()
     if not settings.b2b_base_url:
@@ -326,7 +358,7 @@ def fetch_b2b_catalog(query_params) -> dict | None:
     payload = response.json()
     items = payload.get("items", payload if isinstance(payload, list) else [])
     if isinstance(items, list):
-        sanitized_items = [sanitize_b2b_product_card(item) for item in items]
+        sanitized_items = [sanitize_b2b_catalog_item(item) for item in items]
         if isinstance(payload, dict):
             payload = dict(payload)
             payload["items"] = sanitized_items
@@ -369,7 +401,7 @@ def serialize_product_for_catalog(product: Product) -> dict:
         "slug": product.slug,
         "title": product.title,
         "description": product.description,
-        "images": [{"url": image["url"], "ordering": image["order"]} for image in serialize_images(product.images)],
+        "images": serialize_images(product.images),
         "status": product.status.value,
         "store": serialize_store(product.store),
         "brand": product_brand(product),
@@ -400,7 +432,7 @@ def serialize_product_for_cart(product: Product) -> dict:
         "price_from": cents_to_rub(product_min_price(product)),
         "default_sku_id": default_sku.id if default_sku else None,
         "category": {"id": product.category.id, "name": product.category.name},
-        "images": [{"url": image["url"], "ordering": image["order"]} for image in serialize_images(product.images)],
+        "images": serialize_images(product.images),
         "characteristics": serialize_characteristics(product.characteristics),
         "skus": [serialize_sku_for_cart(sku) for sku in sorted(product.skus, key=lambda item: (item.price_cents, item.name))],
     }
@@ -411,16 +443,16 @@ def serialize_product_short(product: Product, is_in_cart: bool) -> dict:
     return {
         "id": product.id,
         "slug": product.slug,
-        "title": product.title,
-        "image": product_main_image(product),
+        "name": product.title,
+        "images": serialize_images(product.images),
         "store": serialize_store(product.store),
         "brand": product_brand(product),
         "rating": product.rating,
         "popularity": product.popularity,
         "discount_percent": product.discount_percent,
         "default_sku_id": default_sku.id if default_sku else None,
-        "price": cents_to_rub(product_min_price(product)),
-        "in_stock": any(sku.active_quantity > 0 and sku.is_active for sku in product.skus),
+        "min_price": product_min_price(product),
+        "has_stock": any(sku.active_quantity > 0 and sku.is_active for sku in product.skus),
         "is_in_cart": is_in_cart,
     }
 
@@ -744,7 +776,9 @@ def parse_filters(query_params) -> dict[str, object]:
         values = query_params.getlist(key)
         if key.startswith("filters[") and key.endswith("]"):
             merge_value(key[8:-1], values)
-        elif key == "filters":
+        elif key.startswith("filter[") and key.endswith("]"):
+            merge_value(key[7:-1], values)
+        elif key in {"filters", "filter"}:
             for raw_value in values:
                 try:
                     payload = json.loads(raw_value)
@@ -813,22 +847,18 @@ def search_products(products: list[Product], search: str | None) -> list[Product
 def sort_products(products: list[Product], sort: str | None) -> list[Product]:
     if sort is None:
         return sorted(products, key=lambda item: item.popularity, reverse=True)
-    if sort == "rating":
-        return sorted(products, key=lambda item: item.rating, reverse=True)
     if sort == "popularity":
         return sorted(products, key=lambda item: item.popularity, reverse=True)
     if sort == "price_asc":
         return sorted(products, key=lambda item: product_min_price(item))
     if sort == "price_desc":
         return sorted(products, key=lambda item: product_min_price(item), reverse=True)
-    if sort == "date_desc":
+    if sort == "new":
         return sorted(products, key=lambda item: item.created_at, reverse=True)
-    if sort == "discount_desc":
-        return sorted(products, key=lambda item: item.discount_percent, reverse=True)
     raise APIError(
         400,
         "INVALID_SORT",
-        "Invalid sort parameter. Allowed values: rating, popularity, price_asc, price_desc, date_desc, discount_desc",
+        "Invalid sort parameter. Allowed values: price_asc, price_desc, popularity, new",
     )
 
 

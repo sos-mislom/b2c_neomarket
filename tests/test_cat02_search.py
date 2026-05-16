@@ -7,16 +7,16 @@ from app.main import app
 
 def test_search_returns_matching_products() -> None:
     with TestClient(app) as client:
-        response = client.get("/api/v1/products?search=matcha")
+        response = client.get("/api/v1/catalog/products?search=matcha")
 
     assert response.status_code == 200
-    titles = [item["title"].lower() for item in response.json()["items"]]
-    assert any("matcha" in title for title in titles)
+    names = [item["name"].lower() for item in response.json()["items"]]
+    assert any("matcha" in name for name in names)
 
 
 def test_short_query_returns_400() -> None:
     with TestClient(app) as client:
-        response = client.get("/api/v1/products?search=ab")
+        response = client.get("/api/v1/catalog/products?search=ab")
 
     assert response.status_code == 400
     assert response.json()["code"] == "INVALID_SEARCH"
@@ -24,7 +24,7 @@ def test_short_query_returns_400() -> None:
 
 def test_special_chars_do_not_break_query() -> None:
     with TestClient(app) as client:
-        response = client.get("/api/v1/products?search=iPhone%2515%27")
+        response = client.get("/api/v1/catalog/products?search=iPhone%2515%27")
 
     assert response.status_code == 200
     assert response.json()["items"] == []
