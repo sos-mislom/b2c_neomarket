@@ -28,15 +28,18 @@ def test_catalog_returns_filtered_sorted_products() -> None:
     category_id = stable_uuid("category:green-tea")
 
     with TestClient(app) as client:
-        response = client.get(f"/api/v1/products?category_id={category_id}&sort=price_asc&limit=20")
+        response = client.get(f"/api/v1/catalog/products?category_id={category_id}&sort=price_asc&limit=20")
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["total_count"] >= 3
-    prices = [item["price"] for item in payload["items"]]
+    prices = [item["min_price"] for item in payload["items"]]
     assert prices == sorted(prices)
     assert stable_uuid("product:tea-sampler-weekend-market") not in {item["id"] for item in payload["items"]}
-    assert all(item["in_stock"] is True for item in payload["items"])
+    assert all(item["has_stock"] is True for item in payload["items"])
+    assert all({"id", "name", "min_price", "has_stock", "images"} <= set(item) for item in payload["items"])
+    assert isinstance(payload["items"][0]["min_price"], int)
+    assert {"id", "url", "ordering"} <= set(payload["items"][0]["images"][0])
 
 
 def test_facets_return_counts_per_filter_value() -> None:
@@ -53,7 +56,7 @@ def test_facets_return_counts_per_filter_value() -> None:
 
 def test_invalid_sort_returns_400() -> None:
     with TestClient(app) as client:
-        response = client.get("/api/v1/products?sort=totally_wrong")
+        response = client.get("/api/v1/catalog/products?sort=totally_wrong")
 
     assert response.status_code == 400
     payload = response.json()
@@ -73,7 +76,7 @@ def test_b2b_unavailable_returns_503(monkeypatch) -> None:
 
     try:
         with TestClient(app) as client:
-            response = client.get("/api/v1/products?limit=10")
+            response = client.get("/api/v1/catalog/products?limit=10")
     finally:
         get_settings.cache_clear()
 
@@ -132,7 +135,7 @@ def test_b2b_catalog_response_is_sanitized_and_authorized(monkeypatch) -> None:
 
     try:
         with TestClient(app) as client:
-            response = client.get("/api/v1/products?limit=10&sort=price_asc")
+            response = client.get("/api/v1/catalog/products?limit=10&sort=price_asc")
     finally:
         get_settings.cache_clear()
 
@@ -142,8 +145,8 @@ def test_b2b_catalog_response_is_sanitized_and_authorized(monkeypatch) -> None:
     assert captured["headers"]["X-Service-Key"] == "secret-b2c-to-b2b"
     assert captured["headers"]["Authorization"] == "Bearer seller-token"
     item = response.json()["items"][0]
-    assert item["images"] == [{"url": "/image.jpg", "ordering": 0}]
-    assert item["skus"][0]["active_quantity"] == 3
-    assert item["skus"][0]["in_stock"] is True
-    assert "cost_price" not in item["skus"][0]
-    assert "reserved_quantity" not in item["skus"][0]
+    assert item["name"] == "Tea"
+    assert item["min_price"] == 1000
+    assert item["has_stock"] is True
+    assert item["images"] == [{"id": "/image.jpg", "url": "/image.jpg", "ordering": 0}]
+    assert "skus" not in item

@@ -41,7 +41,7 @@ from ..services import (
 router = APIRouter(tags=["catalog"])
 
 
-@router.get("/api/v1/products")
+@router.get("/api/v1/catalog/products")
 def list_products(
     request: Request,
     limit: int = Query(default=10, ge=1, le=100),
