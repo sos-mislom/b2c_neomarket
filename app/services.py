@@ -655,6 +655,8 @@ def build_breadcrumbs(by_id: dict[str, Category], category_id: str) -> list[Cate
             raise APIError(422, "orphan_node", "category hierarchy is broken")
         seen.add(current.id)
         chain.append(current)
+        if current.parent_id and current.parent_id not in by_id:
+            raise APIError(422, "orphan_node", "category hierarchy is broken")
         current = by_id.get(current.parent_id) if current.parent_id else None
     chain.reverse()
     return chain
