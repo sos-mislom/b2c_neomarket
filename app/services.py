@@ -256,6 +256,17 @@ def serialize_store(store: Store | None) -> dict | None:
     }
 
 
+def serialize_seller(store: Store | None) -> dict | None:
+    if store is None:
+        return None
+    return {
+        "id": store.id,
+        "slug": store.slug,
+        "name": store.name,
+        "rating": store.rating,
+    }
+
+
 def serialize_images(items, order_field: str = "ordering") -> list[dict]:
     ordered = sorted(items, key=lambda item: getattr(item, order_field))
     return [
@@ -309,6 +320,73 @@ def sanitize_b2b_product_card(payload: dict) -> dict:
     return product
 
 
+def b2b_seller(product: dict) -> dict | None:
+    seller = product.get("seller")
+    if seller is not None:
+        return seller
+    store = product.get("store")
+    if store is None:
+        return None
+    if isinstance(store, dict):
+        return {
+            "id": store.get("id"),
+            "slug": store.get("slug"),
+            "name": store.get("name"),
+            "rating": store.get("rating"),
+        }
+    return {"name": str(store)}
+
+
+def b2b_sku_price(sku: dict) -> int | None:
+    price = sku.get("price_cents", sku.get("price"))
+    return int(price) if price is not None else None
+
+
+def b2b_catalog_sku(sku: dict) -> dict:
+    price = b2b_sku_price(sku)
+    active_quantity = int(sku.get("available_quantity", sku.get("active_quantity", sku.get("quantity", 0))))
+    return {
+        "id": sku.get("id"),
+        "name": sku.get("name"),
+        "price": price if price is not None else 0,
+        "discount": sku.get("discount", 0),
+        "image": sku.get("image"),
+        "available_quantity": active_quantity,
+        "in_stock": bool(sku.get("in_stock", active_quantity > 0)),
+        "characteristics": sku.get("characteristics", []),
+        "images": normalize_b2c_images(sku.get("images")),
+    }
+
+
+def b2b_catalog_card(product: dict) -> dict:
+    skus = product.get("skus") or []
+    prices = [price for sku in skus if (price := b2b_sku_price(sku)) is not None]
+    available_quantities = [
+        int(sku.get("available_quantity", sku.get("active_quantity", sku.get("quantity", 0))))
+        for sku in skus
+    ]
+    return {
+        "id": product.get("id"),
+        "slug": product.get("slug"),
+        "name": product.get("name") or product.get("title"),
+        "description": product.get("description"),
+        "images": normalize_b2c_images(product.get("images")),
+        "status": product.get("status"),
+        "seller": b2b_seller(product),
+        "brand": product.get("brand"),
+        "rating": product.get("rating"),
+        "popularity": product.get("popularity"),
+        "discount_percent": product.get("discount_percent", 0),
+        "min_price": int(product.get("min_price", min(prices) if prices else 0)),
+        "has_stock": bool(product.get("has_stock", any(quantity > 0 for quantity in available_quantities))),
+        "default_sku_id": product.get("default_sku_id") or (skus[0].get("id") if skus else None),
+        "category": product.get("category") or ({"id": product.get("category_id")} if product.get("category_id") else None),
+        "category_id": product.get("category_id"),
+        "characteristics": product.get("characteristics", []),
+        "skus": [b2b_catalog_sku(sku) for sku in skus],
+    }
+
+
 def sanitize_b2b_catalog_item(payload: dict) -> dict:
     product = sanitize_b2b_product_card(payload)
     skus = product.get("skus") or []
@@ -326,7 +404,7 @@ def sanitize_b2b_catalog_item(payload: dict) -> dict:
             product.get("has_stock", any(sku.get("in_stock") or sku.get("active_quantity", 0) > 0 for sku in skus))
         ),
         "images": normalize_b2c_images(product.get("images")),
-        "store": product.get("store"),
+        "seller": b2b_seller(product),
         "brand": product.get("brand"),
         "rating": product.get("rating"),
         "popularity": product.get("popularity"),
@@ -391,7 +469,7 @@ def fetch_b2b_product_card(product_id: str) -> dict | None:
     payload = response.json()
     if payload.get("status") in {"BLOCKED", "HARD_BLOCKED"} or payload.get("deleted") is True or payload.get("is_deleted") is True:
         raise APIError(404, "PRODUCT_NOT_FOUND", "Товар не найден")
-    return sanitize_b2b_product_card(payload)
+    return b2b_catalog_card(sanitize_b2b_product_card(payload))
 
 
 def serialize_product_for_catalog(product: Product) -> dict:
@@ -399,16 +477,17 @@ def serialize_product_for_catalog(product: Product) -> dict:
     return {
         "id": product.id,
         "slug": product.slug,
-        "title": product.title,
+        "name": product.title,
         "description": product.description,
         "images": serialize_images(product.images),
         "status": product.status.value,
-        "store": serialize_store(product.store),
+        "seller": serialize_seller(product.store),
         "brand": product_brand(product),
         "rating": product.rating,
         "popularity": product.popularity,
         "discount_percent": product.discount_percent,
-        "price_from": cents_to_rub(product_min_price(product)),
+        "min_price": product_min_price(product),
+        "has_stock": any(sku.active_quantity > 0 and sku.is_active for sku in product.skus),
         "default_sku_id": default_sku.id if default_sku else None,
         "category": {"id": product.category.id, "name": product.category.name},
         "characteristics": serialize_characteristics(product.characteristics),
@@ -445,7 +524,7 @@ def serialize_product_short(product: Product, is_in_cart: bool) -> dict:
         "slug": product.slug,
         "name": product.title,
         "images": serialize_images(product.images),
-        "store": serialize_store(product.store),
+        "seller": serialize_seller(product.store),
         "brand": product_brand(product),
         "rating": product.rating,
         "popularity": product.popularity,
@@ -483,7 +562,7 @@ def serialize_sku_for_catalog(sku: Sku) -> dict:
         "price": sku.price_cents,
         "discount": discount,
         "image": sku_main_image(sku),
-        "active_quantity": sku.active_quantity,
+        "available_quantity": sku.active_quantity,
         "in_stock": sku.is_active and sku.active_quantity > 0,
         "characteristics": serialize_characteristics(sku.characteristics),
         "images": serialize_images(sku.images),
@@ -494,8 +573,8 @@ def serialize_sku_short_for_catalog(sku: Sku) -> dict:
     main_image = sku_main_image(sku)
     return {
         "name": sku.name,
-        "price": cents_to_rub(sku.price_cents),
-        "image": {"url": main_image, "order": 0},
+        "price": sku.price_cents,
+        "image": {"id": main_image or sku.id, "url": main_image, "ordering": 0},
     }
 
 

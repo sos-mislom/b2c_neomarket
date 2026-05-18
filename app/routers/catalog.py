@@ -73,16 +73,16 @@ def list_products(
     }
 
 
-@router.get("/api/v1/products/{id}")
+@router.get("/api/v1/catalog/products/{product_id}")
 def get_product(
-    id: str,
+    product_id: str,
     session: Session = Depends(get_session),
 ) -> dict:
-    b2b_product = fetch_b2b_product_card(id)
+    b2b_product = fetch_b2b_product_card(product_id)
     if b2b_product is not None:
         return b2b_product
 
-    product = get_product_by_slug_or_id(session, id)
+    product = get_product_by_slug_or_id(session, product_id)
     if not product_is_visible(product):
         raise APIError(404, "PRODUCT_NOT_FOUND", "Товар не найден")
     return serialize_product_for_catalog(product)
