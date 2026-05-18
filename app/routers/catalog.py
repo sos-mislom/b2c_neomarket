@@ -134,6 +134,7 @@ def get_similar_products(
     return [serialize_product_short(item, item.id in cart_product_ids) for item in sliced]
 
 
+@router.get("/api/v1/catalog/categories")
 @router.get("/api/v1/categories")
 def get_category_tree(session: Session = Depends(get_session)) -> dict:
     categories = get_all_categories(session)
@@ -142,6 +143,7 @@ def get_category_tree(session: Session = Depends(get_session)) -> dict:
     return {"items": [serialize_category_node(category, children_map) for category in roots]}
 
 
+@router.get("/api/v1/catalog/categories/path/{slug_path:path}")
 @router.get("/api/v1/categories/path/{slug_path:path}")
 def get_category_by_path(
     slug_path: str,
@@ -153,6 +155,7 @@ def get_category_by_path(
     return get_category_detail(category.id, include_product_count=include_product_count, lang=lang, session=session)
 
 
+@router.get("/api/v1/catalog/categories/{id}")
 @router.get("/api/v1/categories/{id}")
 def get_category_detail(
     id: str,
@@ -192,6 +195,7 @@ def get_category_detail(
     }
 
 
+@router.get("/api/v1/catalog/categories/{id}/filters")
 @router.get("/api/v1/categories/{id}/filters")
 def get_category_filters(id: str, session: Session = Depends(get_session)) -> dict:
     get_category_or_404(session, id)
@@ -211,6 +215,7 @@ def get_facets(
     return build_facets_response(products, filters, category_id)
 
 
+@router.get("/api/v1/catalog/breadcrumbs")
 @router.get("/api/v1/breadcrumbs")
 def get_breadcrumbs(
     category_id: str | None = Query(default=None),
