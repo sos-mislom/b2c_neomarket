@@ -16,19 +16,23 @@ def test_product_card_returns_full_data_with_skus() -> None:
     product_id = stable_uuid("product:sencha-yabukita-premium")
 
     with TestClient(app) as client:
-        response = client.get(f"/api/v1/products/{product_id}")
+        response = client.get(f"/api/v1/catalog/products/{product_id}")
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["id"] == product_id
-    assert payload["title"]
+    assert payload["name"]
     assert payload["description"]
     assert payload["images"]
+    assert {"id", "url", "ordering"} <= set(payload["images"][0])
     assert payload["characteristics"]
+    assert isinstance(payload["min_price"], int)
+    assert payload["has_stock"] is True
+    assert payload["seller"]["name"]
     assert payload["skus"]
     assert isinstance(payload["skus"][0]["price"], int)
     assert "discount" in payload["skus"][0]
-    assert "active_quantity" in payload["skus"][0]
+    assert "available_quantity" in payload["skus"][0]
     assert "in_stock" in payload["skus"][0]
 
 
@@ -36,7 +40,7 @@ def test_cost_price_absent_in_response() -> None:
     product_id = stable_uuid("product:sencha-yabukita-premium")
 
     with TestClient(app) as client:
-        response = client.get(f"/api/v1/products/{product_id}")
+        response = client.get(f"/api/v1/catalog/products/{product_id}")
 
     assert response.status_code == 200
     first_sku = response.json()["skus"][0]
@@ -48,7 +52,7 @@ def test_blocked_product_returns_404() -> None:
     blocked_product_id = stable_uuid("product:tea-sampler-weekend-market")
 
     with TestClient(app) as client:
-        response = client.get(f"/api/v1/products/{blocked_product_id}")
+        response = client.get(f"/api/v1/catalog/products/{blocked_product_id}")
 
     assert response.status_code == 404
     assert response.json()["code"] == "PRODUCT_NOT_FOUND"
@@ -65,12 +69,12 @@ def test_sku_without_stock_is_shown_as_unavailable() -> None:
             sku.active_quantity = 0
             session.commit()
 
-        response = client.get(f"/api/v1/products/{product_id}")
+        response = client.get(f"/api/v1/catalog/products/{product_id}")
 
     assert response.status_code == 200
     skus = response.json()["skus"]
     out_of_stock_sku = next(item for item in skus if item["id"] == sku_id)
-    assert out_of_stock_sku["active_quantity"] == 0
+    assert out_of_stock_sku["available_quantity"] == 0
     assert out_of_stock_sku["in_stock"] is False
 
 
@@ -124,5 +128,10 @@ def test_b2b_product_response_is_sanitized_and_authorized(monkeypatch) -> None:
     assert captured["headers"]["X-Service-Key"] == "secret-b2c-to-b2b"
     assert captured["headers"]["Authorization"] == "Bearer seller-token"
     assert payload["category_id"] == "category-id"
+    assert payload["name"] == "Tea"
+    assert payload["min_price"] == 1000
+    assert payload["has_stock"] is True
+    assert payload["images"] == [{"id": "/image.jpg", "url": "/image.jpg", "ordering": 0}]
+    assert payload["skus"][0]["available_quantity"] == 3
     assert "cost_price" not in payload["skus"][0]
     assert "reserved_quantity" not in payload["skus"][0]
