@@ -64,6 +64,14 @@ def test_invalid_sort_returns_400() -> None:
     assert "price_asc" in payload["message"]
 
 
+def test_sort_new_returns_200() -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/v1/catalog/products?sort=new")
+
+    assert response.status_code == 200
+    assert response.json()["items"]
+
+
 def test_b2b_unavailable_returns_503(monkeypatch) -> None:
     monkeypatch.setenv("B2B_BASE_URL", "http://b2b:8000")
     monkeypatch.setenv("B2B_SERVICE_KEY", "secret-b2c-to-b2b")

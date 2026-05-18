@@ -48,7 +48,7 @@ def list_products(
     offset: int = Query(default=0, ge=0),
     category_id: str | None = Query(default=None),
     sort: str | None = Query(default=None),
-    search: str | None = Query(default=None),
+    q: str | None = Query(default=None),
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
     x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
     session: Session = Depends(get_session),
@@ -59,7 +59,7 @@ def list_products(
 
     filters = parse_filters(request.query_params)
     products = get_category_products(session, category_id)
-    products = search_products(products, search)
+    products = search_products(products, q)
     products = [product for product in products if product_matches_filters(product, filters)]
     products = sort_products(products, sort)
     cart_product_ids = get_cart_product_ids(session, x_user_id, x_session_id)

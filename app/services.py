@@ -71,6 +71,7 @@ RESERVED_QUERY_KEYS = {
     "offset",
     "sort",
     "search",
+    "q",
     "category_id",
     "filters",
     "filter",
@@ -80,7 +81,6 @@ RESERVED_QUERY_KEYS = {
     "product_id",
 }
 CHECKOUT_CANCELABLE = {OrderStatus.CREATED, OrderStatus.PAID}
-
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc).replace(microsecond=0)
@@ -832,6 +832,8 @@ def search_products(products: list[Product], search: str | None) -> list[Product
     if not search:
         return products
     normalized = search.strip().lower()
+    if len(normalized) > 200:
+        raise APIError(400, "INVALID_SEARCH", "Search query must be at most 200 characters")
     if len(normalized) < 3:
         raise APIError(400, "INVALID_SEARCH", "Поисковый запрос должен содержать не менее 3 символов")
     return [
