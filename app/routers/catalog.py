@@ -11,6 +11,7 @@ from ..services import (
     build_facets_response,
     fetch_b2b_catalog,
     fetch_b2b_product_card,
+    fetch_b2b_similar_products,
     build_filters_response,
     build_similar_products,
     category_slug_path,
@@ -30,7 +31,6 @@ from ..services import (
     search_products,
     serialize_category_node,
     serialize_product_for_catalog,
-    serialize_product_for_cart,
     serialize_product_short,
     serialize_sku_for_catalog,
     serialize_sku_short_for_catalog,
@@ -107,30 +107,31 @@ def get_product_sku(product_id: str, sku_id: str, session: Session = Depends(get
     return serialize_sku_for_catalog(sku)
 
 
-@router.get("/api/v1/products/{id}/similar")
+@router.get("/api/v1/catalog/products/{product_id}/similar")
 def get_similar_products(
-    id: str,
+    request: Request,
+    product_id: str,
     category: str | None = Query(default=None),
     limit: int = Query(default=8, ge=1, le=50),
     offset: int = Query(default=0, ge=0),
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
     x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
     session: Session = Depends(get_session),
-) -> dict:
-    product = get_product_by_slug_or_id(session, id)
+) -> list[dict]:
+    b2b_similar = fetch_b2b_similar_products(product_id, request.query_params)
+    if b2b_similar is not None:
+        return b2b_similar
+
+    product = get_product_by_slug_or_id(session, product_id)
     all_products = load_all_products(session)
+    cart_product_ids = get_cart_product_ids(session, x_user_id, x_session_id)
     if category:
         similar = [item for item in build_similar_products(product, all_products, limit + offset + 20) if item.category_id == category]
-        cart_product_ids = get_cart_product_ids(session, x_user_id, x_session_id)
         sliced = similar[offset : offset + limit]
-        return {
-            "items": [serialize_product_short(item, item.id in cart_product_ids) for item in sliced],
-            "total_count": len(similar),
-            "limit": limit,
-            "offset": offset,
-        }
-    similar = build_similar_products(product, all_products, limit)
-    return {"items": [serialize_product_for_cart(item) for item in similar], "total": len(similar)}
+        return [serialize_product_short(item, item.id in cart_product_ids) for item in sliced]
+    similar = build_similar_products(product, all_products, limit + offset)
+    sliced = similar[offset : offset + limit]
+    return [serialize_product_short(item, item.id in cart_product_ids) for item in sliced]
 
 
 @router.get("/api/v1/categories")
