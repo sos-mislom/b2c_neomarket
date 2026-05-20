@@ -126,6 +126,12 @@ def get_similar_products(
     all_products = load_all_products(session)
     cart_product_ids = get_cart_product_ids(session, x_user_id, x_session_id)
     if category:
+        try:
+            get_category_or_404(session, category)
+        except APIError as exc:
+            if exc.status_code == 404:
+                raise APIError(400, "INVALID_REQUEST", "Nonexistent category id") from exc
+            raise
         similar = [item for item in build_similar_products(product, all_products, limit + offset + 20) if item.category_id == category]
         sliced = similar[offset : offset + limit]
         return [serialize_product_short(item, item.id in cart_product_ids) for item in sliced]
