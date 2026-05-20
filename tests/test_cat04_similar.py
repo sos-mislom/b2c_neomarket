@@ -39,6 +39,18 @@ def test_unknown_product_returns_404() -> None:
     assert response.status_code == 404
 
 
+def test_nonexistent_category_returns_400() -> None:
+    product_id = stable_uuid("product:sencha-yabukita-premium")
+    missing_category_id = stable_uuid("category:missing-similar")
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/v1/catalog/products/{product_id}/similar?category={missing_category_id}")
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["code"] == "INVALID_REQUEST"
+
+
 def test_similar_products_proxied_to_b2b(monkeypatch) -> None:
     monkeypatch.setenv("B2B_BASE_URL", "http://b2b:8000")
     monkeypatch.setenv("B2B_SERVICE_KEY", "secret-b2c-to-b2b")
@@ -84,3 +96,5 @@ def test_similar_products_proxied_to_b2b(monkeypatch) -> None:
     assert payload[0]["name"] == "Similar Tea"
     assert payload[0]["min_price"] == 1200
     assert payload[0]["has_stock"] is True
+    assert "cost_price" not in payload[0]
+    assert "reserved_quantity" not in payload[0]
