@@ -9,14 +9,68 @@ from app.seed import stable_uuid
 from app.services import now_utc
 
 
-def test_category_tree_returns_nested_structure() -> None:
+def test_categories_return_flat_category_refs() -> None:
     with TestClient(app) as client:
         response = client.get("/api/v1/catalog/categories")
 
     assert response.status_code == 200
-    roots = response.json()["items"]
+    categories = response.json()
+    assert isinstance(categories, list)
+    assert categories
+    assert all("children" not in category for category in categories)
+    assert {"id", "name", "slug", "parent_id", "level", "path"} <= set(categories[0])
+
+
+def test_category_tree_returns_nested_structure() -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/v1/catalog/categories/tree")
+
+    assert response.status_code == 200
+    roots = response.json()
+    assert isinstance(roots, list)
     assert roots
     assert any(root["children"] for root in roots)
+    assert {"id", "name", "slug", "parent_id", "level", "path", "children"} <= set(roots[0])
+
+
+def test_inactive_categories_not_visible() -> None:
+    inactive_id = stable_uuid("category:inactive-hidden")
+    now = now_utc()
+    with SessionLocal() as session:
+        session.add(
+            Category(
+                id=inactive_id,
+                name="Inactive Hidden",
+                slug="inactive-hidden",
+                description="Hidden category fixture",
+                parent_id=None,
+                seo_title="Inactive Hidden",
+                seo_description="Hidden category fixture",
+                seo_keywords=[],
+                meta_tags={},
+                image_url=None,
+                is_active=False,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.commit()
+
+    try:
+        with TestClient(app) as client:
+            list_response = client.get("/api/v1/catalog/categories")
+            tree_response = client.get("/api/v1/catalog/categories/tree")
+    finally:
+        with SessionLocal() as session:
+            category = session.get(Category, inactive_id)
+            if category is not None:
+                session.delete(category)
+                session.commit()
+
+    assert list_response.status_code == 200
+    assert inactive_id not in {category["id"] for category in list_response.json()}
+    assert tree_response.status_code == 200
+    assert inactive_id not in {category["id"] for category in tree_response.json()}
 
 
 def test_breadcrumbs_return_path_from_root() -> None:

@@ -615,8 +615,10 @@ def serialize_sku_for_cart(sku: Sku) -> dict:
     }
 
 
-def get_all_categories(session: Session) -> list[Category]:
+def get_all_categories(session: Session, active_only: bool = False) -> list[Category]:
     stmt = select(Category).order_by(Category.name.asc())
+    if active_only:
+        stmt = stmt.where(Category.is_active.is_(True))
     return list(session.scalars(stmt).all())
 
 
@@ -630,12 +632,31 @@ def build_category_maps(categories: list[Category]) -> tuple[dict[str, Category]
     return by_id, children
 
 
-def serialize_category_node(category: Category, children_map: dict[str | None, list[Category]]) -> dict:
+def category_ref(category: Category, by_id: dict[str, Category] | None = None) -> dict:
+    level = 0
+    path = category.slug
+    if by_id is not None:
+        chain = build_breadcrumbs(by_id, category.id)
+        level = len(chain) - 1
+        path = "/".join(item.slug for item in chain)
     return {
         "id": category.id,
         "name": category.name,
+        "slug": category.slug,
         "parent_id": category.parent_id,
-        "children": [serialize_category_node(child, children_map) for child in children_map.get(category.id, [])],
+        "level": level,
+        "path": path,
+    }
+
+
+def serialize_category_node(
+    category: Category,
+    children_map: dict[str | None, list[Category]],
+    by_id: dict[str, Category] | None = None,
+) -> dict:
+    return {
+        **category_ref(category, by_id),
+        "children": [serialize_category_node(child, children_map, by_id) for child in children_map.get(category.id, [])],
     }
 
 
