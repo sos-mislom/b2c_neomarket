@@ -82,9 +82,12 @@ class CancelOrderRequest(BaseModel):
 
 
 class ProductEventRequest(BaseModel):
-    type: str
-    sku_ids: list[str]
+    type: str | None = None
+    event_type: str | None = None
+    sku_ids: list[str] = Field(default_factory=list)
     idempotency_key: str
+    occurred_at: datetime | None = None
+    payload: dict | None = None
 
     @field_validator("idempotency_key")
     @classmethod
