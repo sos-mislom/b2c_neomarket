@@ -17,7 +17,11 @@ def test_orders_list_returns_own_orders_paginated() -> None:
     payload = response.json()
     assert payload["limit"] == 1
     assert len(payload["items"]) == 1
-    assert payload["items"][0]["status"] == "DELIVERED"
+    order = payload["items"][0]
+    assert order["status"] == "DELIVERED"
+    assert order["buyer_id"] == "11111111-1111-1111-1111-111111111111"
+    assert order["subtotal"] == order["total_amount"]
+    assert order["total"] == order["total_amount"]
 
 
 def test_order_detail_shows_fixed_prices() -> None:
@@ -30,7 +34,11 @@ def test_order_detail_shows_fixed_prices() -> None:
         )
 
     assert response.status_code == 200
-    item = response.json()["items"][0]
+    payload = response.json()
+    assert payload["buyer_id"] == "11111111-1111-1111-1111-111111111111"
+    assert payload["address"]["city"] == "Ekaterinburg"
+    item = payload["items"][0]
+    assert item["name"]
     assert item["unit_price"] > 0
     assert item["line_total"] == item["unit_price"] * item["quantity"]
 
