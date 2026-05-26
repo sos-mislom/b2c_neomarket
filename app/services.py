@@ -828,28 +828,51 @@ def build_cart_payload(items: list[CartItem]) -> dict:
 
 
 def serialize_order(order: Order) -> dict:
+    items = [
+        {
+            "id": item.id,
+            "product_id": item.product_id,
+            "sku_id": item.sku_id,
+            "name": f"{item.product_title} / {item.sku_name}",
+            "product_title": item.product_title,
+            "sku_name": item.sku_name,
+            "unit_price": item.unit_price,
+            "quantity": item.quantity,
+            "line_total": item.line_total,
+        }
+        for item in order.items
+    ]
     return {
         "id": order.id,
+        "number": f"NM-2026-{order.order_number:06d}",
         "order_number": order.order_number,
+        "buyer_id": order.user_id,
         "status": order.status.value,
+        "subtotal": order.total_amount,
+        "delivery_cost": 0,
+        "total": order.total_amount,
         "total_amount": order.total_amount,
         "currency": order.currency,
+        "address": {
+            "id": "demo-address",
+            "country": "RU",
+            "city": "Ekaterinburg",
+            "street": "NeoMarket",
+            "building": "1",
+            "created_at": order.created_at.isoformat(),
+        },
+        "payment_method": {
+            "id": "demo-payment-method",
+            "type": "CARD",
+            "created_at": order.created_at.isoformat(),
+        },
         "created_at": order.created_at.isoformat(),
         "updated_at": order.updated_at.isoformat(),
+        "paid_at": order.created_at.isoformat() if order.status.value in {"PAID", "ASSEMBLING", "DELIVERING", "DELIVERED"} else None,
+        "delivered_at": order.updated_at.isoformat() if order.status == OrderStatus.DELIVERED else None,
+        "cancel_reason": None,
         "can_cancel": order.status in CHECKOUT_CANCELABLE,
-        "items": [
-            {
-                "id": item.id,
-                "product_id": item.product_id,
-                "sku_id": item.sku_id,
-                "product_title": item.product_title,
-                "sku_name": item.sku_name,
-                "unit_price": item.unit_price,
-                "quantity": item.quantity,
-                "line_total": item.line_total,
-            }
-            for item in order.items
-        ],
+        "items": items,
     }
 
 
@@ -1347,9 +1370,37 @@ def checkout_cart(session: Session, user_id: str, idempotency_key: str | None = 
     return refreshed
 
 
+def send_b2b_unreserve(order: Order) -> bool:
+    settings = get_settings()
+    if not settings.b2b_base_url:
+        return True
+
+    payload = {
+        "order_id": order.id,
+        "reason": "ORDER_CANCELLED",
+        "items": [{"sku_id": item.sku_id, "quantity": item.quantity} for item in order.items],
+    }
+    try:
+        response = httpx.post(
+            f"{settings.b2b_base_url.rstrip('/')}/api/v1/unreserve",
+            json=payload,
+            headers=b2b_headers(),
+            timeout=settings.b2b_timeout_seconds,
+        )
+    except httpx.RequestError:
+        return False
+    return response.status_code < 500
+
+
 def cancel_order(session: Session, order: Order, reason: str | None = None) -> Order:
     if order.status not in CHECKOUT_CANCELABLE:
         raise APIError(409, "CANCEL_NOT_ALLOWED", "Заказ нельзя отменить на текущем статусе")
+
+    if not send_b2b_unreserve(order):
+        order.status = OrderStatus.CANCEL_PENDING
+        order.updated_at = now_utc()
+        session.commit()
+        return session.scalar(select(Order).options(selectinload(Order.items)).where(Order.id == order.id))
 
     if not order.reservation_released:
         sku_ids = [item.sku_id for item in order.items]
