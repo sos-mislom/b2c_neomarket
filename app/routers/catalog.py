@@ -14,6 +14,7 @@ from ..services import (
     fetch_b2b_similar_products,
     build_filters_response,
     build_similar_products,
+    category_ref,
     category_slug_path,
     category_subtree_ids,
     demo_metadata,
@@ -142,11 +143,19 @@ def get_similar_products(
 
 @router.get("/api/v1/catalog/categories")
 @router.get("/api/v1/categories")
-def get_category_tree(session: Session = Depends(get_session)) -> dict:
-    categories = get_all_categories(session)
-    _, children_map = build_category_maps(categories)
+def get_categories(session: Session = Depends(get_session)) -> list[dict]:
+    categories = get_all_categories(session, active_only=True)
+    by_id, _ = build_category_maps(categories)
+    return [category_ref(category, by_id) for category in categories]
+
+
+@router.get("/api/v1/catalog/categories/tree")
+@router.get("/api/v1/categories/tree")
+def get_category_tree(session: Session = Depends(get_session)) -> list[dict]:
+    categories = get_all_categories(session, active_only=True)
+    by_id, children_map = build_category_maps(categories)
     roots = children_map.get(None, [])
-    return {"items": [serialize_category_node(category, children_map) for category in roots]}
+    return [serialize_category_node(category, children_map, by_id) for category in roots]
 
 
 @router.get("/api/v1/catalog/categories/path/{slug_path:path}")
@@ -172,7 +181,9 @@ def get_category_detail(
     if lang not in {"ru", "en"}:
         raise APIError(400, "INVALID_LANG", "Поддерживаются только языки ru и en")
     category = get_category_or_404(session, id)
-    categories = get_all_categories(session)
+    if not category.is_active:
+        raise APIError(404, "CATEGORY_NOT_FOUND", "РљР°С‚РµРіРѕСЂРёСЏ РЅРµ РЅР°Р№РґРµРЅР°")
+    categories = get_all_categories(session, active_only=True)
     by_id, children_map = build_category_maps(categories)
     parent = by_id.get(category.parent_id) if category.parent_id else None
     product_count = None
@@ -238,7 +249,7 @@ def get_breadcrumbs(
             "only one of category_id or product_id must be provided" if category_id and product_id else "category_id or product_id must be provided",
         )
 
-    categories = get_all_categories(session)
+    categories = get_all_categories(session, active_only=True)
     by_id, _ = build_category_maps(categories)
     resolved_category_id = category_id
     resolved_via = "category_id"
