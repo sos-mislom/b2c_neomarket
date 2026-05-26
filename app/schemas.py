@@ -61,6 +61,8 @@ class BannerEventsRequest(BaseModel):
 
 class CheckoutRequest(BaseModel):
     idempotency_key: str | None = None
+    address_id: str | None = None
+    payment_method_id: str | None = None
     comment: str | None = None
     delivery_address: str | None = None
 
