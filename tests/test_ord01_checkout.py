@@ -19,14 +19,23 @@ def test_checkout_creates_paid_order_with_fixed_prices() -> None:
         response = client.post(
             "/api/v1/orders",
             headers={"X-User-Id": user_id},
-            json={"idempotency_key": "checkout-fixed-prices"},
+            json={
+                "idempotency_key": "checkout-fixed-prices",
+                "address_id": "addr-checkout",
+                "payment_method_id": "pm-card",
+            },
         )
 
     assert add_response.status_code == 200
     assert response.status_code == 201
     payload = response.json()
     assert payload["status"] == "PAID"
+    assert payload["buyer_id"] == user_id
+    assert payload["subtotal"] == payload["total_amount"]
+    assert payload["total"] == payload["total_amount"]
+    assert payload["address"]["id"] == "demo-address"
     item = next(item for item in payload["items"] if item["sku_id"] == sku_id)
+    assert item["name"]
     assert item["unit_price"] > 0
     assert item["line_total"] == item["unit_price"] * 2
 
