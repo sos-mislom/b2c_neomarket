@@ -499,6 +499,33 @@ def fetch_b2b_similar_products(product_id: str, query_params) -> list[dict] | No
     return [sanitize_b2b_catalog_item(item) for item in items]
 
 
+def fetch_b2b_products_by_ids(product_ids: list[str]) -> dict[str, dict] | None:
+    settings = get_settings()
+    if not settings.b2b_base_url:
+        return None
+    if not product_ids:
+        return {}
+
+    try:
+        response = httpx.get(
+            f"{settings.b2b_base_url.rstrip('/')}/api/v1/products",
+            params={"ids": ",".join(product_ids)},
+            headers=b2b_headers(),
+            timeout=settings.b2b_timeout_seconds,
+        )
+    except httpx.RequestError as exc:
+        raise APIError(503, "B2B_UNAVAILABLE", "B2B product service is unavailable") from exc
+
+    if response.status_code >= 500:
+        raise APIError(503, "B2B_UNAVAILABLE", "B2B product service is unavailable")
+    if response.status_code >= 400:
+        raise APIError(response.status_code, "B2B_ERROR", "B2B product service rejected request")
+
+    payload = response.json()
+    items = payload.get("items", payload if isinstance(payload, list) else [])
+    return {item["id"]: item for item in [sanitize_b2b_catalog_item(item) for item in items] if item.get("id")}
+
+
 def serialize_product_for_catalog(product: Product) -> dict:
     default_sku = product_default_sku(product)
     return {
