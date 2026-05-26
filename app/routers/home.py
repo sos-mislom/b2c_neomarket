@@ -100,6 +100,34 @@ def list_collections(
     }
 
 
+@router.get("/api/v1/catalog/collections")
+def list_catalog_collections(session: Session = Depends(get_session)) -> list[dict]:
+    today = date.today()
+    stmt = select(Collection).where(Collection.is_active.is_(True), Collection.start_date <= today).order_by(Collection.priority.asc())
+    collections = list(session.scalars(stmt).all())
+    return [serialize_collection_for_catalog(session, collection) for collection in collections]
+
+
+def serialize_collection_for_catalog(session: Session, collection: Collection) -> dict:
+    links = list(
+        session.scalars(
+            select(CollectionProduct).where(CollectionProduct.collection_id == collection.id).order_by(CollectionProduct.ordering.asc())
+        ).all()
+    )
+    products = []
+    for link in links:
+        product = get_product_or_404(session, link.product_id)
+        if product_is_visible(product):
+            products.append(serialize_product_for_cart(product))
+    return {
+        "id": collection.id,
+        "name": collection.title,
+        "title": collection.title,
+        "description": collection.description,
+        "products": products,
+    }
+
+
 @router.get("/api/v1/collections/{collection_ref}/products")
 def get_collection_products(
     collection_ref: str,

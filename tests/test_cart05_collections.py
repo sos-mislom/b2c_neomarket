@@ -16,6 +16,17 @@ def test_collections_list_returns_metadata_without_products() -> None:
     assert "products" not in payload["collections"][0]
 
 
+def test_catalog_collections_return_protocol_array() -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/v1/catalog/collections")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert isinstance(payload, list)
+    assert payload
+    assert {"id", "name", "products"} <= set(payload[0])
+
+
 def test_collection_products_enriched_from_b2b() -> None:
     with TestClient(app) as client:
         response = client.get("/api/v1/collections/green-harvest/products")
