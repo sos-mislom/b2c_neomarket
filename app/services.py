@@ -1500,6 +1500,10 @@ def send_b2b_fulfill(order: Order) -> bool:
 
 
 def mark_order_delivered(session: Session, order: Order) -> tuple[Order, bool]:
+    if order.status == OrderStatus.DELIVERED:
+        refreshed = session.scalar(select(Order).options(selectinload(Order.items)).where(Order.id == order.id))
+        return refreshed, False
+
     order.status = OrderStatus.DELIVERED
     order.updated_at = now_utc()
     session.commit()
