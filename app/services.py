@@ -1431,9 +1431,37 @@ def checkout_cart(session: Session, user_id: str, idempotency_key: str | None = 
     return refreshed
 
 
+def send_b2b_unreserve(order: Order) -> bool:
+    settings = get_settings()
+    if not settings.b2b_base_url:
+        return True
+
+    payload = {
+        "order_id": order.id,
+        "reason": "ORDER_CANCELLED",
+        "items": [{"sku_id": item.sku_id, "quantity": item.quantity} for item in order.items],
+    }
+    try:
+        response = httpx.post(
+            f"{settings.b2b_base_url.rstrip('/')}/api/v1/unreserve",
+            json=payload,
+            headers=b2b_headers(),
+            timeout=settings.b2b_timeout_seconds,
+        )
+    except httpx.RequestError:
+        return False
+    return response.status_code < 500
+
+
 def cancel_order(session: Session, order: Order, reason: str | None = None) -> Order:
     if order.status not in CHECKOUT_CANCELABLE:
         raise APIError(409, "CANCEL_NOT_ALLOWED", "Заказ нельзя отменить на текущем статусе")
+
+    if not send_b2b_unreserve(order):
+        order.status = OrderStatus.CANCEL_PENDING
+        order.updated_at = now_utc()
+        session.commit()
+        return session.scalar(select(Order).options(selectinload(Order.items)).where(Order.id == order.id))
 
     if not order.reservation_released:
         sku_ids = [item.sku_id for item in order.items]
