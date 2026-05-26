@@ -743,6 +743,7 @@ def process_product_event(
     normalized_type = event_type.upper()
     reason_by_type = {
         "PRODUCT_BLOCKED": "PRODUCT_BLOCKED",
+        "PRODUCT_HARD_BLOCKED": "PRODUCT_BLOCKED",
         "PRODUCT_DELETED": "PRODUCT_DELISTED",
         "SKU_OUT_OF_STOCK": "OUT_OF_STOCK",
         "OUT_OF_STOCK": "OUT_OF_STOCK",
