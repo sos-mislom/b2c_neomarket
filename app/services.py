@@ -820,31 +820,39 @@ def serialize_cart_item(cart_item: CartItem) -> dict:
     sku = cart_item.sku
     product = sku.product
     unavailable_reason = cart_item_unavailable_reason(cart_item)
-    available = unavailable_reason is None
+    is_available = unavailable_reason is None
     unit_price = sku.price_cents if sku else 0
+    line_total = unit_price * cart_item.quantity if is_available else 0
+    image_url = sku_main_image(sku)
     return {
         "item_id": cart_item.id,
         "sku_id": sku.id,
         "product_id": product.id,
+        "name": f"{product.title} / {sku.name}",
         "product_title": product.title,
         "store_name": product.store.name if product.store else None,
         "sku_name": sku.name,
-        "image_url": sku_main_image(sku),
+        "image_url": image_url,
         "unit_price": unit_price,
         "quantity": cart_item.quantity,
+        "available_quantity": sku.active_quantity,
         "available_stock": sku.active_quantity,
-        "line_total": unit_price * cart_item.quantity if available else 0,
-        "available": available,
+        "line_total": line_total,
+        "is_available": is_available,
+        "available": is_available,
         "unavailable_reason": unavailable_reason,
     }
 
 
 def build_cart_payload(items: list[CartItem]) -> dict:
     serialized_items = [serialize_cart_item(item) for item in items]
-    total_amount = sum(item["line_total"] for item in serialized_items if item["available"])
+    subtotal = sum(item["line_total"] for item in serialized_items if item["is_available"])
+    items_count = sum(item["quantity"] for item in serialized_items)
     total_items = len(serialized_items)
     total_quantity = sum(item["quantity"] for item in serialized_items)
-    available_items = sum(1 for item in serialized_items if item["available"])
+    available_items = sum(1 for item in serialized_items if item["is_available"])
+    is_valid = all(item["is_available"] for item in serialized_items)
+    updated_at = max((item.updated_at for item in items), default=now_utc()).isoformat()
     checkout_items = [
         {
             "product_id": item["product_id"],
@@ -854,22 +862,27 @@ def build_cart_payload(items: list[CartItem]) -> dict:
             "line_total": item["line_total"],
         }
         for item in serialized_items
-        if item["available"]
+        if item["is_available"]
     ]
     return {
+        "id": items[0].user_id or items[0].session_id if items else None,
         "items": serialized_items,
+        "items_count": items_count,
+        "subtotal": subtotal,
+        "is_valid": is_valid,
+        "updated_at": updated_at,
         "summary": {
-            "total_amount": total_amount,
+            "total_amount": subtotal,
             "total_items": total_items,
             "total_quantity": total_quantity,
             "available_items": available_items,
-            "has_unavailable_items": any(not item["available"] for item in serialized_items),
-            "checkout_ready": total_items > 0 and all(item["available"] for item in serialized_items),
+            "has_unavailable_items": any(not item["is_available"] for item in serialized_items),
+            "checkout_ready": total_items > 0 and is_valid,
             "currency": "RUB",
         },
         "checkout_payload": {
             "items": checkout_items,
-            "total_amount": total_amount,
+            "total_amount": subtotal,
             "currency": "RUB",
         },
     }
@@ -1265,7 +1278,7 @@ def ensure_cart_item_owner(item: CartItem | None, user_id: str | None, session_i
         return item
     if session_id and item.session_id == session_id:
         return item
-    raise APIError(403, "ACCESS_DENIED", "Нет доступа к этой позиции корзины")
+    raise APIError(404, "CART_ITEM_NOT_FOUND", "Позиция не найдена в корзине")
 
 
 def validate_sku_for_cart(sku: Sku, quantity: int) -> None:

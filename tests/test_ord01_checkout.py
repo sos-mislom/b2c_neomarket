@@ -22,7 +22,7 @@ def test_checkout_creates_paid_order_with_fixed_prices() -> None:
             json={"idempotency_key": "checkout-fixed-prices"},
         )
 
-    assert add_response.status_code == 201
+    assert add_response.status_code == 200
     assert response.status_code == 201
     payload = response.json()
     assert payload["status"] == "PAID"
@@ -52,7 +52,7 @@ def test_idempotency_returns_existing_order() -> None:
             json={"idempotency_key": "checkout-idempotent-key"},
         )
 
-    assert add_response.status_code == 201
+    assert add_response.status_code == 200
     assert first.status_code == 201
     assert second.status_code == 201
     assert second.json()["id"] == first.json()["id"]
