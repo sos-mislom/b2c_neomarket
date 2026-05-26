@@ -23,7 +23,7 @@ def test_product_blocked_marks_cart_items_unavailable() -> None:
         )
         cart_response = client.get("/api/v1/cart", headers={"X-User-Id": user_id})
 
-    assert add_response.status_code == 201
+    assert add_response.status_code == 200
     assert event_response.status_code == 200
     item = next(item for item in cart_response.json()["items"] if item["sku_id"] == sku_id)
     assert item["available"] is False

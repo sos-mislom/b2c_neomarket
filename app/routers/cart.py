@@ -19,7 +19,6 @@ from ..services import (
     find_cart_item,
     get_cart_items,
     get_product_or_404,
-    load_all_products,
     merge_guest_cart_into_user,
     product_is_visible,
     require_cart_identity,
@@ -29,6 +28,13 @@ from ..services import (
 
 
 router = APIRouter(tags=["cart"])
+
+
+def find_owned_cart_item_by_sku_or_id(session: Session, item_ref: str, user_id: str | None, session_id: str | None) -> CartItem:
+    for item in get_cart_items(session, user_id, session_id):
+        if item.sku_id == item_ref or item.id == item_ref:
+            return item
+    raise APIError(404, "CART_ITEM_NOT_FOUND", "Cart item not found")
 
 
 @router.get("/api/v1/cart")
@@ -68,14 +74,9 @@ def add_cart_item(
 ) -> JSONResponse:
     user_id, session_id = require_cart_identity(x_user_id, x_session_id)
     merge_guest_cart_into_user(session, user_id, session_id)
-    item, status_code = add_or_update_cart_item(session, payload.sku_id, payload.quantity, user_id, session_id)
+    add_or_update_cart_item(session, payload.sku_id, payload.quantity, user_id, session_id)
     cart_payload = build_cart_payload(get_cart_items(session, user_id, session_id))
-    content = {
-        "message": "Позиция корзины успешно обновлена" if status_code == 200 else "Товар добавлен в корзину",
-        "item": next(entry for entry in cart_payload["items"] if entry["item_id"] == item.id),
-        "summary": cart_payload["summary"],
-    }
-    return JSONResponse(status_code=status_code, content=content)
+    return JSONResponse(status_code=status.HTTP_200_OK, content=cart_payload)
 
 
 @router.get("/api/v1/cart/items/{item_id}")
@@ -90,6 +91,7 @@ def get_cart_item(
     return next(entry for entry in build_cart_payload([item])["items"] if entry["item_id"] == item.id)
 
 
+@router.patch("/api/v1/cart/items/{item_id}")
 @router.put("/api/v1/cart/items/{item_id}")
 def update_cart_item(
     item_id: str,
@@ -99,32 +101,28 @@ def update_cart_item(
     session: Session = Depends(get_session),
 ) -> dict:
     user_id, session_id = require_cart_identity(x_user_id, x_session_id)
-    item = ensure_cart_item_owner(find_cart_item(session, item_id), user_id, session_id)
-    updated = update_cart_item_quantity(session, item, payload.quantity)
-    cart_payload = build_cart_payload(get_cart_items(session, user_id, session_id))
-    return {
-        "message": "Позиция корзины успешно обновлена",
-        "item": next(entry for entry in cart_payload["items"] if entry["item_id"] == updated.id),
-        "summary": cart_payload["summary"],
-    }
+    item = find_owned_cart_item_by_sku_or_id(session, item_id, user_id, session_id)
+    update_cart_item_quantity(session, item, payload.quantity)
+    return build_cart_payload(get_cart_items(session, user_id, session_id))
 
 
-@router.delete("/api/v1/cart/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/api/v1/cart/items/{item_id}")
 def delete_cart_item(
     item_id: str,
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
     x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
     session: Session = Depends(get_session),
-) -> Response:
+) -> dict:
     user_id, session_id = require_cart_identity(x_user_id, x_session_id)
-    item = ensure_cart_item_owner(find_cart_item(session, item_id), user_id, session_id)
+    item = find_owned_cart_item_by_sku_or_id(session, item_id, user_id, session_id)
     session.delete(item)
     session.commit()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return build_cart_payload(get_cart_items(session, user_id, session_id))
 
 
 @router.get("/cart/validate")
 @router.get("/api/v1/cart/validate")
+@router.post("/api/v1/cart/validate")
 def validate_cart(
     cart_item_ids: list[str] | None = Query(default=None),
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
@@ -133,6 +131,19 @@ def validate_cart(
     user_id = require_user_id(None, x_user_id)
     items = get_cart_items(session, user_id, None)
     return build_validation_response(items, cart_item_ids)
+
+
+@router.post("/api/v1/cart/merge")
+def merge_cart(
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
+    session: Session = Depends(get_session),
+) -> dict:
+    user_id = require_user_id(None, x_user_id)
+    if not x_session_id:
+        raise APIError(400, "MISSING_SESSION_ID", "X-Session-Id is required")
+    merge_guest_cart_into_user(session, user_id, x_session_id)
+    return build_cart_payload(get_cart_items(session, user_id, None))
 
 
 @router.get("/api/v1/cart/also_bought")

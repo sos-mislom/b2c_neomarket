@@ -16,6 +16,15 @@ def test_add_to_favorites_returns_201() -> None:
     assert response.json()["product_id"] == product_id
 
 
+def test_put_favorite_returns_204_for_openapi_contract() -> None:
+    product_id = stable_uuid("product:longjing-spring-reserve")
+
+    with TestClient(app) as client:
+        response = client.put(f"/api/v1/favorites/{product_id}", headers={"X-User-Id": "favorite-put-user"})
+
+    assert response.status_code == 204
+
+
 def test_repeat_add_returns_200_not_duplicate() -> None:
     product_id = stable_uuid("product:gyokuro-asahi-shade")
     headers = {"X-User-Id": "repeat-favorite-user"}
@@ -27,7 +36,8 @@ def test_repeat_add_returns_200_not_duplicate() -> None:
 
     assert first.status_code == 201
     assert second.status_code == 200
-    assert [item["product"]["id"] for item in listed.json()["items"]].count(product_id) == 1
+    assert [item["id"] for item in listed.json()["items"]].count(product_id) == 1
+    assert {"items", "total_count", "limit", "offset"} <= set(listed.json())
 
 
 def test_blocked_product_excluded_from_list() -> None:
@@ -37,7 +47,7 @@ def test_blocked_product_excluded_from_list() -> None:
         response = client.get("/api/v1/favorites", headers={"X-User-Id": "11111111-1111-1111-1111-111111111111"})
 
     assert response.status_code == 200
-    assert blocked_product_id not in {item["product"]["id"] for item in response.json()["items"]}
+    assert blocked_product_id not in {item["id"] for item in response.json()["items"]}
 
 
 def test_user_id_from_query_is_ignored() -> None:
@@ -58,5 +68,5 @@ def test_user_id_from_query_is_ignored() -> None:
 
     assert response.status_code == 201
     assert response.json()["user_id"] == owner_id
-    assert product_id in {item["product"]["id"] for item in owner_response.json()["items"]}
-    assert product_id not in {item["product"]["id"] for item in attacker_response.json()["items"]}
+    assert product_id in {item["id"] for item in owner_response.json()["items"]}
+    assert product_id not in {item["id"] for item in attacker_response.json()["items"]}

@@ -499,6 +499,33 @@ def fetch_b2b_similar_products(product_id: str, query_params) -> list[dict] | No
     return [sanitize_b2b_catalog_item(item) for item in items]
 
 
+def fetch_b2b_products_by_ids(product_ids: list[str]) -> dict[str, dict] | None:
+    settings = get_settings()
+    if not settings.b2b_base_url:
+        return None
+    if not product_ids:
+        return {}
+
+    try:
+        response = httpx.get(
+            f"{settings.b2b_base_url.rstrip('/')}/api/v1/products",
+            params={"ids": ",".join(product_ids)},
+            headers=b2b_headers(),
+            timeout=settings.b2b_timeout_seconds,
+        )
+    except httpx.RequestError as exc:
+        raise APIError(503, "B2B_UNAVAILABLE", "B2B product service is unavailable") from exc
+
+    if response.status_code >= 500:
+        raise APIError(503, "B2B_UNAVAILABLE", "B2B product service is unavailable")
+    if response.status_code >= 400:
+        raise APIError(response.status_code, "B2B_ERROR", "B2B product service rejected request")
+
+    payload = response.json()
+    items = payload.get("items", payload if isinstance(payload, list) else [])
+    return {item["id"]: item for item in [sanitize_b2b_catalog_item(item) for item in items] if item.get("id")}
+
+
 def serialize_product_for_catalog(product: Product) -> dict:
     default_sku = product_default_sku(product)
     return {
@@ -772,31 +799,42 @@ def serialize_cart_item(cart_item: CartItem) -> dict:
     sku = cart_item.sku
     product = sku.product
     unavailable_reason = cart_item_unavailable_reason(cart_item)
-    available = unavailable_reason is None
+    is_available = unavailable_reason is None
     unit_price = sku.price_cents if sku else 0
-    return {
+    line_total = unit_price * cart_item.quantity if is_available else 0
+    image_url = sku_main_image(sku)
+    payload = {
         "item_id": cart_item.id,
         "sku_id": sku.id,
         "product_id": product.id,
+        "name": f"{product.title} / {sku.name}",
         "product_title": product.title,
         "store_name": product.store.name if product.store else None,
         "sku_name": sku.name,
-        "image_url": sku_main_image(sku),
+        "image_url": image_url,
         "unit_price": unit_price,
         "quantity": cart_item.quantity,
+        "available_quantity": sku.active_quantity,
         "available_stock": sku.active_quantity,
-        "line_total": unit_price * cart_item.quantity if available else 0,
-        "available": available,
+        "line_total": line_total,
+        "is_available": is_available,
+        "available": is_available,
         "unavailable_reason": unavailable_reason,
     }
+    if image_url and image_url.startswith(("http://", "https://")):
+        payload["image"] = {"id": sku.id, "url": image_url, "ordering": 0}
+    return payload
 
 
 def build_cart_payload(items: list[CartItem]) -> dict:
     serialized_items = [serialize_cart_item(item) for item in items]
-    total_amount = sum(item["line_total"] for item in serialized_items if item["available"])
+    subtotal = sum(item["line_total"] for item in serialized_items if item["is_available"])
+    items_count = sum(item["quantity"] for item in serialized_items)
     total_items = len(serialized_items)
     total_quantity = sum(item["quantity"] for item in serialized_items)
-    available_items = sum(1 for item in serialized_items if item["available"])
+    available_items = sum(1 for item in serialized_items if item["is_available"])
+    is_valid = all(item["is_available"] for item in serialized_items)
+    updated_at = max((item.updated_at for item in items), default=now_utc()).isoformat()
     checkout_items = [
         {
             "product_id": item["product_id"],
@@ -806,22 +844,27 @@ def build_cart_payload(items: list[CartItem]) -> dict:
             "line_total": item["line_total"],
         }
         for item in serialized_items
-        if item["available"]
+        if item["is_available"]
     ]
     return {
+        "id": items[0].user_id or items[0].session_id if items else None,
         "items": serialized_items,
+        "items_count": items_count,
+        "subtotal": subtotal,
+        "is_valid": is_valid,
+        "updated_at": updated_at,
         "summary": {
-            "total_amount": total_amount,
+            "total_amount": subtotal,
             "total_items": total_items,
             "total_quantity": total_quantity,
             "available_items": available_items,
-            "has_unavailable_items": any(not item["available"] for item in serialized_items),
-            "checkout_ready": total_items > 0 and all(item["available"] for item in serialized_items),
+            "has_unavailable_items": any(not item["is_available"] for item in serialized_items),
+            "checkout_ready": total_items > 0 and is_valid,
             "currency": "RUB",
         },
         "checkout_payload": {
             "items": checkout_items,
-            "total_amount": total_amount,
+            "total_amount": subtotal,
             "currency": "RUB",
         },
     }
@@ -1217,7 +1260,7 @@ def ensure_cart_item_owner(item: CartItem | None, user_id: str | None, session_i
         return item
     if session_id and item.session_id == session_id:
         return item
-    raise APIError(403, "ACCESS_DENIED", "Нет доступа к этой позиции корзины")
+    raise APIError(404, "CART_ITEM_NOT_FOUND", "Позиция не найдена в корзине")
 
 
 def validate_sku_for_cart(sku: Sku, quantity: int) -> None:
