@@ -15,22 +15,32 @@ class UpdateCartItemRequest(BaseModel):
 
 
 class SubscribeRequest(BaseModel):
-    notify_on: list[str]
+    notify_on: list[str] | None = None
+    events: list[str] | None = None
 
-    @field_validator("notify_on")
-    @classmethod
-    def validate_notify_on(cls, value: list[str]) -> list[str]:
-        if not value:
-            raise ValueError("notify_on must not be empty")
-        allowed = {"IN_STOCK", "PRICE_DOWN"}
+    def normalized_notify_on(self) -> list[str]:
+        values = self.notify_on if self.notify_on is not None else self.events
+        if values is None:
+            return ["IN_STOCK", "PRICE_DOWN"]
+        if not values:
+            return []
+        aliases = {
+            "IN_STOCK": "IN_STOCK",
+            "BACK_IN_STOCK": "IN_STOCK",
+            "PRICE_DOWN": "PRICE_DOWN",
+            "PRICE_DROP": "PRICE_DOWN",
+        }
         normalized = []
-        for item in value:
-            upper_item = item.upper()
-            if upper_item not in allowed:
-                raise ValueError("notify_on contains unsupported value")
-            if upper_item not in normalized:
-                normalized.append(upper_item)
+        for item in values:
+            mapped = aliases.get(item.upper())
+            if mapped is None:
+                return []
+            if mapped not in normalized:
+                normalized.append(mapped)
         return normalized
+
+    def uses_protocol_events(self) -> bool:
+        return self.events is not None and self.notify_on is None
 
 
 class BannerEventIn(BaseModel):
