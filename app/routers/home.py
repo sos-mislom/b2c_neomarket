@@ -34,6 +34,20 @@ def as_utc_naive(value: datetime) -> datetime:
 
 @router.get("/api/v1/home/banners")
 def get_home_banners(session: Session = Depends(get_session)) -> dict:
+    banners = active_home_banners(session)
+    return {
+        "items": [serialize_banner(banner) for banner in banners],
+        "total_count": len(banners),
+        "meta": demo_metadata(),
+    }
+
+
+@router.get("/api/v1/catalog/banners")
+def get_catalog_banners(session: Session = Depends(get_session)) -> list[dict]:
+    return [serialize_banner(banner) for banner in active_home_banners(session)]
+
+
+def active_home_banners(session: Session) -> list[Banner]:
     now = now_utc().replace(tzinfo=None)
     stmt = select(Banner).where(Banner.is_active.is_(True), Banner.placement == "home").order_by(Banner.priority.asc())
     banners = []
@@ -42,19 +56,19 @@ def get_home_banners(session: Session = Depends(get_session)) -> dict:
         end_at = as_utc_naive(banner.end_at) if banner.end_at else None
         if start_at <= now and (end_at is None or end_at >= now):
             banners.append(banner)
+    return banners
+
+
+def serialize_banner(banner: Banner) -> dict:
     return {
-        "items": [
-            {
-                "id": banner.id,
-                "title": banner.title,
-                "image_url": banner.image_url,
-                "link": banner.link,
-                "priority": banner.priority,
-            }
-            for banner in banners
-        ],
-        "total_count": len(banners),
-        "meta": demo_metadata(),
+        "id": banner.id,
+        "title": banner.title,
+        "image_url": banner.image_url,
+        "link": banner.link,
+        "priority": banner.priority,
+        "ordering": banner.priority,
+        "active_from": banner.start_at.isoformat(),
+        "active_to": banner.end_at.isoformat() if banner.end_at else None,
     }
 
 

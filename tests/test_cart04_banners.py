@@ -14,6 +14,17 @@ def test_active_banners_returned_sorted_by_priority() -> None:
     assert priorities == sorted(priorities)
 
 
+def test_catalog_banners_return_protocol_array() -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/v1/catalog/banners")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert isinstance(payload, list)
+    assert payload
+    assert {"id", "image_url", "link", "ordering"} <= set(payload[0])
+
+
 def test_no_active_banners_returns_200_empty() -> None:
     with TestClient(app) as client:
         response = client.get("/api/v1/home/banners")
