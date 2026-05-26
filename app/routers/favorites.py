@@ -121,12 +121,16 @@ def delete_favorite(
 @router.post("/api/v1/favorites/{product_id}/subscribe", status_code=status.HTTP_201_CREATED)
 def subscribe_to_product(
     product_id: str,
-    payload: SubscribeRequest,
+    payload: SubscribeRequest | None = None,
     user_id: str | None = Query(default=None),
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
     session: Session = Depends(get_session),
 ) -> dict:
-    current_user_id = require_user_id(user_id, x_user_id)
+    current_user_id = require_user_id(None, x_user_id)
+    payload = payload or SubscribeRequest()
+    notify_on = payload.normalized_notify_on()
+    if not notify_on:
+        raise APIError(400, "INVALID_NOTIFY_ON", "notify_on/events must contain IN_STOCK/BACK_IN_STOCK or PRICE_DOWN/PRICE_DROP")
     product = assert_product_exists(session, product_id)
     existing = session.scalar(
         select(NotificationSubscription).where(
@@ -140,11 +144,13 @@ def subscribe_to_product(
         id=make_id(),
         user_id=current_user_id,
         product_id=product_id,
-        notify_on=payload.notify_on,
+        notify_on=notify_on,
         created_at=now_utc(),
     )
     session.add(subscription)
     session.commit()
+    if payload.uses_protocol_events():
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
     return {
         "id": subscription.id,
         "product": serialize_product_for_cart(product),
@@ -160,7 +166,7 @@ def unsubscribe_from_product(
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
     session: Session = Depends(get_session),
 ) -> Response:
-    current_user_id = require_user_id(user_id, x_user_id)
+    current_user_id = require_user_id(None, x_user_id)
     assert_product_exists(session, product_id)
     session.execute(
         delete(NotificationSubscription).where(
