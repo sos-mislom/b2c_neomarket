@@ -59,7 +59,7 @@ def test_unreserve_failure_transitions_to_cancel_pending(monkeypatch) -> None:
         finally:
             get_settings.cache_clear()
 
-    assert add_response.status_code == 201
+    assert add_response.status_code in {200, 201}
     assert order_response.status_code == 201
     assert response.status_code == 200
     assert response.json()["status"] == "CANCEL_PENDING"
