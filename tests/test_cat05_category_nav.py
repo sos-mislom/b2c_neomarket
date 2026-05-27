@@ -19,6 +19,9 @@ def test_categories_return_flat_category_refs() -> None:
     assert categories
     assert all("children" not in category for category in categories)
     assert {"id", "name", "slug", "parent_id", "level", "path"} <= set(categories[0])
+    assert all(isinstance(category["path"], list) for category in categories)
+    assert all(category["path"][-1] == category["slug"] for category in categories)
+    assert all(len(category["path"]) == category["level"] + 1 for category in categories)
 
 
 def test_category_tree_returns_nested_structure() -> None:
@@ -31,6 +34,8 @@ def test_category_tree_returns_nested_structure() -> None:
     assert roots
     assert any(root["children"] for root in roots)
     assert {"id", "name", "slug", "parent_id", "level", "path", "children"} <= set(roots[0])
+    assert isinstance(roots[0]["path"], list)
+    assert roots[0]["path"][-1] == roots[0]["slug"]
 
 
 def test_inactive_categories_not_visible() -> None:

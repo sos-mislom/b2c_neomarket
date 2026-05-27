@@ -661,11 +661,11 @@ def build_category_maps(categories: list[Category]) -> tuple[dict[str, Category]
 
 def category_ref(category: Category, by_id: dict[str, Category] | None = None) -> dict:
     level = 0
-    path = category.slug
+    path = [category.slug]
     if by_id is not None:
         chain = build_breadcrumbs(by_id, category.id)
         level = len(chain) - 1
-        path = "/".join(item.slug for item in chain)
+        path = [item.slug for item in chain]
     return {
         "id": category.id,
         "name": category.name,
