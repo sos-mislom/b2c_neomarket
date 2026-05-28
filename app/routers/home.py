@@ -19,6 +19,7 @@ from ..services import (
     now_utc,
     product_is_visible,
     serialize_collection,
+    serialize_product_for_catalog,
     serialize_product_for_cart,
 )
 
@@ -132,7 +133,7 @@ def serialize_collection_for_catalog(session: Session, collection: Collection) -
     for link in links:
         product = get_product_or_404(session, link.product_id)
         if product_is_visible(product):
-            products.append(serialize_product_for_cart(product))
+            products.append(serialize_product_for_catalog(product))
     return {
         "id": collection.id,
         "name": collection.title,
