@@ -1142,6 +1142,7 @@ def build_facets_response(products: list[Product], filters: dict[str, object], c
 
 
 def build_validation_response(items: list[CartItem], cart_item_ids: list[str] | None = None) -> dict:
+    cart_payload = build_cart_payload(items)
     if cart_item_ids:
         lookup = {item.id: item for item in items}
         missing = [item_id for item_id in cart_item_ids if item_id not in lookup]
@@ -1158,7 +1159,7 @@ def build_validation_response(items: list[CartItem], cart_item_ids: list[str] | 
                 {
                     "cart_item_id": item.id,
                     "sku_id": item.sku_id,
-                    "issue_type": "DELETED",
+                    "type": "PRODUCT_DELETED",
                     "severity": "critical",
                     "message": "Товар удалён продавцом",
                     "details": {
@@ -1174,7 +1175,7 @@ def build_validation_response(items: list[CartItem], cart_item_ids: list[str] | 
                 {
                     "cart_item_id": item.id,
                     "sku_id": item.sku_id,
-                    "issue_type": "BLOCKED",
+                    "type": "PRODUCT_BLOCKED",
                     "severity": "critical",
                     "message": "Товар заблокирован модератором и недоступен для покупки",
                     "details": {
@@ -1191,7 +1192,7 @@ def build_validation_response(items: list[CartItem], cart_item_ids: list[str] | 
                 {
                     "cart_item_id": item.id,
                     "sku_id": item.sku_id,
-                    "issue_type": "ON_MODERATION",
+                    "type": "PRODUCT_BLOCKED",
                     "severity": "warning",
                     "message": "Товар ещё не прошёл модерацию",
                     "details": {
@@ -1207,7 +1208,7 @@ def build_validation_response(items: list[CartItem], cart_item_ids: list[str] | 
                 {
                     "cart_item_id": item.id,
                     "sku_id": item.sku_id,
-                    "issue_type": "OUT_OF_STOCK",
+                    "type": "OUT_OF_STOCK",
                     "severity": "critical",
                     "message": "Товар отсутствует в наличии",
                     "details": {
@@ -1225,7 +1226,7 @@ def build_validation_response(items: list[CartItem], cart_item_ids: list[str] | 
                 {
                     "cart_item_id": item.id,
                     "sku_id": item.sku_id,
-                    "issue_type": "INSUFFICIENT_STOCK",
+                    "type": "QUANTITY_REDUCED",
                     "severity": "warning",
                     "message": "Доступно меньше товара, чем в корзине",
                     "details": {
@@ -1240,6 +1241,7 @@ def build_validation_response(items: list[CartItem], cart_item_ids: list[str] | 
 
     return {
         "is_valid": not issues,
+        "cart": cart_payload,
         "can_checkout": bool(items) and not any(issue["severity"] == "critical" for issue in issues),
         "total_items": len(items),
         "validation_timestamp": now_utc().isoformat(),

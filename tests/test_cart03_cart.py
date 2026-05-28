@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from app.db import SessionLocal
 from app.main import app
-from app.models import CartItem
+from app.models import CartItem, Product, Sku
 from app.seed import stable_uuid
 
 
@@ -137,3 +137,65 @@ def test_cart_validate_supports_protocol_post() -> None:
 
     assert response.status_code == 200
     assert "is_valid" in response.json()
+
+
+def test_cart_validate_response_matches_contract_with_issues() -> None:
+    user_id = "cart-validate-contract-user"
+    deleted_sku_id = stable_uuid("sku:darjeeling-first-flush-50g")
+    deleted_product_id = stable_uuid("product:darjeeling-first-flush")
+    out_of_stock_sku_id = stable_uuid("sku:milk-oolong-creamy-100g")
+    allowed_issue_types = {
+        "PRICE_CHANGED",
+        "OUT_OF_STOCK",
+        "QUANTITY_REDUCED",
+        "PRODUCT_BLOCKED",
+        "PRODUCT_DELETED",
+    }
+
+    with TestClient(app) as client:
+        first = client.post(
+            "/api/v1/cart/items",
+            headers={"X-User-Id": user_id},
+            json={"sku_id": deleted_sku_id, "quantity": 1},
+        )
+        second = client.post(
+            "/api/v1/cart/items",
+            headers={"X-User-Id": user_id},
+            json={"sku_id": out_of_stock_sku_id, "quantity": 1},
+        )
+
+        with SessionLocal() as session:
+            deleted_product = session.get(Product, deleted_product_id)
+            out_of_stock_sku = session.get(Sku, out_of_stock_sku_id)
+            assert deleted_product is not None
+            assert out_of_stock_sku is not None
+            original_deleted = deleted_product.is_deleted
+            original_quantity = out_of_stock_sku.active_quantity
+            deleted_product.is_deleted = True
+            out_of_stock_sku.active_quantity = 0
+            session.commit()
+
+        try:
+            response = client.post("/api/v1/cart/validate", headers={"X-User-Id": user_id})
+        finally:
+            with SessionLocal() as session:
+                deleted_product = session.get(Product, deleted_product_id)
+                out_of_stock_sku = session.get(Sku, out_of_stock_sku_id)
+                if deleted_product is not None:
+                    deleted_product.is_deleted = original_deleted
+                if out_of_stock_sku is not None:
+                    out_of_stock_sku.active_quantity = original_quantity
+                session.commit()
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert response.status_code == 200
+    payload = response.json()
+    assert {"is_valid", "cart", "issues"} <= set(payload)
+    assert {"items", "items_count", "subtotal", "is_valid"} <= set(payload["cart"])
+    assert payload["is_valid"] is False
+    assert {issue["type"] for issue in payload["issues"]} >= {"PRODUCT_DELETED", "OUT_OF_STOCK"}
+    for issue in payload["issues"]:
+        assert {"sku_id", "type", "message"} <= set(issue)
+        assert "issue_type" not in issue
+        assert issue["type"] in allowed_issue_types
