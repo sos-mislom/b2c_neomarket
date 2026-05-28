@@ -25,6 +25,14 @@ def test_catalog_collections_return_protocol_array() -> None:
     assert isinstance(payload, list)
     assert payload
     assert {"id", "name", "products"} <= set(payload[0])
+    assert payload[0]["products"]
+    product = payload[0]["products"][0]
+    assert {"id", "name", "min_price", "has_stock", "images"} <= set(product)
+    assert "title" not in product
+    assert "price_from" not in product
+    assert isinstance(product["min_price"], int)
+    assert isinstance(product["has_stock"], bool)
+    assert isinstance(product["images"], list)
 
 
 def test_collection_products_enriched_from_b2b() -> None:
