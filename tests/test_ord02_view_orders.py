@@ -55,3 +55,28 @@ def test_other_user_order_returns_404_not_403() -> None:
 
     assert response.status_code == 404
 
+
+def test_x_user_id_header_is_ignored_for_orders() -> None:
+    other_order_id = stable_uuid("order:7101")
+
+    with TestClient(app) as client:
+        response = client.get(
+            f"/api/v1/orders/{other_order_id}",
+            headers={
+                **make_auth_headers("11111111-1111-1111-1111-111111111111"),
+                "X-User-Id": "22222222-2222-2222-2222-222222222222",
+            },
+        )
+
+    assert response.status_code == 404
+
+
+def test_x_user_id_without_jwt_returns_401() -> None:
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/v1/orders",
+            headers={"X-User-Id": "11111111-1111-1111-1111-111111111111"},
+        )
+
+    assert response.status_code == 401
+
