@@ -7,6 +7,7 @@ from app.db import SessionLocal
 from app.main import app
 from app.models import CartItem, Product, Sku
 from app.seed import stable_uuid
+from conftest import make_auth_headers
 
 
 def test_add_sku_increments_quantity_if_already_in_cart() -> None:
@@ -34,7 +35,7 @@ def test_add_sku_increments_quantity_if_already_in_cart() -> None:
 
 def test_get_cart_enriched_with_b2b_data() -> None:
     with TestClient(app) as client:
-        response = client.get("/api/v1/cart", headers={"X-User-Id": "11111111-1111-1111-1111-111111111111"})
+        response = client.get("/api/v1/cart", headers=make_auth_headers("11111111-1111-1111-1111-111111111111"))
 
     assert response.status_code == 200
     payload = response.json()
@@ -44,6 +45,7 @@ def test_get_cart_enriched_with_b2b_data() -> None:
     assert "unit_price" in payload["items"][0]
     assert "available_quantity" in payload["items"][0]
     assert "is_available" in payload["items"][0]
+    assert {"id", "url", "ordering"} <= set(payload["items"][0]["image"])
     assert payload["summary"]["currency"] == "RUB"
     assert "subtotal" in payload
 
@@ -52,7 +54,7 @@ def test_unavailable_sku_shown_with_reason() -> None:
     blocked_sku_id = stable_uuid("sku:tea-sampler-weekend-market-6x25")
 
     with TestClient(app) as client:
-        response = client.get("/api/v1/cart", headers={"X-User-Id": "11111111-1111-1111-1111-111111111111"})
+        response = client.get("/api/v1/cart", headers=make_auth_headers("11111111-1111-1111-1111-111111111111"))
 
     assert response.status_code == 200
     item = next(item for item in response.json()["items"] if item["sku_id"] == blocked_sku_id)
@@ -73,10 +75,10 @@ def test_guest_cart_merged_on_login() -> None:
         )
         authed = client.post(
             "/api/v1/cart/items",
-            headers={"X-User-Id": user_id},
+            headers=make_auth_headers(user_id),
             json={"sku_id": sku_id, "quantity": 3},
         )
-        merged = client.get("/api/v1/cart", headers={"X-User-Id": user_id, "X-Session-Id": session_id})
+        merged = client.get("/api/v1/cart", headers={**make_auth_headers(user_id), "X-Session-Id": session_id})
 
     assert guest.status_code == 200
     assert authed.status_code == 200
@@ -101,7 +103,7 @@ def test_explicit_cart_merge_endpoint_returns_cart_response() -> None:
             headers={"X-Session-Id": session_id},
             json={"sku_id": sku_id, "quantity": 2},
         )
-        merged = client.post("/api/v1/cart/merge", headers={"X-User-Id": user_id, "X-Session-Id": session_id})
+        merged = client.post("/api/v1/cart/merge", headers={**make_auth_headers(user_id), "X-Session-Id": session_id})
 
     assert guest.status_code == 200
     assert merged.status_code == 200
@@ -133,7 +135,7 @@ def test_patch_and_delete_cart_item_by_sku_id_return_cart_response() -> None:
 
 def test_cart_validate_supports_protocol_post() -> None:
     with TestClient(app) as client:
-        response = client.post("/api/v1/cart/validate", headers={"X-User-Id": "11111111-1111-1111-1111-111111111111"})
+        response = client.post("/api/v1/cart/validate", headers=make_auth_headers("11111111-1111-1111-1111-111111111111"))
 
     assert response.status_code == 200
     assert "is_valid" in response.json()
@@ -155,12 +157,12 @@ def test_cart_validate_response_matches_contract_with_issues() -> None:
     with TestClient(app) as client:
         first = client.post(
             "/api/v1/cart/items",
-            headers={"X-User-Id": user_id},
+            headers=make_auth_headers(user_id),
             json={"sku_id": deleted_sku_id, "quantity": 1},
         )
         second = client.post(
             "/api/v1/cart/items",
-            headers={"X-User-Id": user_id},
+            headers=make_auth_headers(user_id),
             json={"sku_id": out_of_stock_sku_id, "quantity": 1},
         )
 
@@ -176,7 +178,7 @@ def test_cart_validate_response_matches_contract_with_issues() -> None:
             session.commit()
 
         try:
-            response = client.post("/api/v1/cart/validate", headers={"X-User-Id": user_id})
+            response = client.post("/api/v1/cart/validate", headers=make_auth_headers(user_id))
         finally:
             with SessionLocal() as session:
                 deleted_product = session.get(Product, deleted_product_id)
@@ -199,3 +201,35 @@ def test_cart_validate_response_matches_contract_with_issues() -> None:
         assert {"sku_id", "type", "message"} <= set(issue)
         assert "issue_type" not in issue
         assert issue["type"] in allowed_issue_types
+
+
+def test_cart_uses_jwt_claim_not_x_user_id_header() -> None:
+    sku_id = stable_uuid("sku:earl-grey-bergamot-100g")
+    jwt_user_id = "jwt-cart-owner"
+    spoofed_user_id = "spoofed-cart-owner"
+
+    with TestClient(app) as client:
+        add_response = client.post(
+            "/api/v1/cart/items",
+            headers={**make_auth_headers(jwt_user_id), "X-User-Id": spoofed_user_id},
+            json={"sku_id": sku_id, "quantity": 1},
+        )
+        jwt_cart = client.get("/api/v1/cart", headers=make_auth_headers(jwt_user_id))
+        spoofed_cart = client.get("/api/v1/cart", headers=make_auth_headers(spoofed_user_id))
+
+    assert add_response.status_code == 200
+    assert any(item["sku_id"] == sku_id for item in jwt_cart.json()["items"])
+    assert all(item["sku_id"] != sku_id for item in spoofed_cart.json()["items"])
+
+
+def test_add_unavailable_sku_returns_404() -> None:
+    blocked_sku_id = stable_uuid("sku:tea-sampler-weekend-market-6x25")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/cart/items",
+            headers=make_auth_headers("unavailable-sku-user"),
+            json={"sku_id": blocked_sku_id, "quantity": 1},
+        )
+
+    assert response.status_code == 404

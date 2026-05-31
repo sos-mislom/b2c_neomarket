@@ -23,7 +23,7 @@ from ..services import (
     merge_guest_cart_into_user,
     product_is_visible,
     require_cart_identity,
-    require_user_id,
+    user_id_from_authorization,
     update_cart_item_quantity,
 )
 
@@ -40,22 +40,22 @@ def find_owned_cart_item_by_sku_or_id(session: Session, item_ref: str, user_id: 
 
 @router.get("/api/v1/cart")
 def get_cart(
-    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
     x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
     session: Session = Depends(get_session),
 ) -> dict:
-    user_id, session_id = require_cart_identity(x_user_id, x_session_id)
+    user_id, session_id = require_cart_identity(authorization, x_session_id)
     merge_guest_cart_into_user(session, user_id, session_id)
     return build_cart_payload(get_cart_items(session, user_id, session_id))
 
 
 @router.delete("/api/v1/cart", status_code=status.HTTP_204_NO_CONTENT)
 def clear_cart(
-    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
     x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
     session: Session = Depends(get_session),
 ) -> Response:
-    user_id, session_id = require_cart_identity(x_user_id, x_session_id)
+    user_id, session_id = require_cart_identity(authorization, x_session_id)
     stmt = delete(CartItem)
     if user_id:
         stmt = stmt.where(CartItem.user_id == user_id)
@@ -69,11 +69,11 @@ def clear_cart(
 @router.post("/api/v1/cart/items")
 def add_cart_item(
     payload: AddCartItemRequest,
-    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
     x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
     session: Session = Depends(get_session),
 ) -> JSONResponse:
-    user_id, session_id = require_cart_identity(x_user_id, x_session_id)
+    user_id, session_id = require_cart_identity(authorization, x_session_id)
     merge_guest_cart_into_user(session, user_id, session_id)
     add_or_update_cart_item(session, payload.sku_id, payload.quantity, user_id, session_id)
     cart_payload = build_cart_payload(get_cart_items(session, user_id, session_id))
@@ -83,11 +83,11 @@ def add_cart_item(
 @router.get("/api/v1/cart/items/{item_id}")
 def get_cart_item(
     item_id: str,
-    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
     x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
     session: Session = Depends(get_session),
 ) -> dict:
-    user_id, session_id = require_cart_identity(x_user_id, x_session_id)
+    user_id, session_id = require_cart_identity(authorization, x_session_id)
     item = ensure_cart_item_owner(find_cart_item(session, item_id), user_id, session_id)
     return next(entry for entry in build_cart_payload([item])["items"] if entry["item_id"] == item.id)
 
@@ -97,11 +97,11 @@ def get_cart_item(
 def update_cart_item(
     item_id: str,
     payload: UpdateCartItemRequest,
-    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
     x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
     session: Session = Depends(get_session),
 ) -> dict:
-    user_id, session_id = require_cart_identity(x_user_id, x_session_id)
+    user_id, session_id = require_cart_identity(authorization, x_session_id)
     item = find_owned_cart_item_by_sku_or_id(session, item_id, user_id, session_id)
     update_cart_item_quantity(session, item, payload.quantity)
     return build_cart_payload(get_cart_items(session, user_id, session_id))
@@ -110,11 +110,11 @@ def update_cart_item(
 @router.delete("/api/v1/cart/items/{item_id}")
 def delete_cart_item(
     item_id: str,
-    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
     x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
     session: Session = Depends(get_session),
 ) -> dict:
-    user_id, session_id = require_cart_identity(x_user_id, x_session_id)
+    user_id, session_id = require_cart_identity(authorization, x_session_id)
     item = find_owned_cart_item_by_sku_or_id(session, item_id, user_id, session_id)
     session.delete(item)
     session.commit()
@@ -126,21 +126,23 @@ def delete_cart_item(
 @router.post("/api/v1/cart/validate")
 def validate_cart(
     cart_item_ids: list[str] | None = Query(default=None),
-    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
     session: Session = Depends(get_session),
 ) -> dict:
-    user_id = require_user_id(None, x_user_id)
+    user_id, _ = require_cart_identity(authorization, None)
     items = get_cart_items(session, user_id, None)
     return build_validation_response(items, cart_item_ids)
 
 
 @router.post("/api/v1/cart/merge")
 def merge_cart(
-    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
     x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
     session: Session = Depends(get_session),
 ) -> dict:
-    user_id = require_user_id(None, x_user_id)
+    user_id = user_id_from_authorization(authorization)
+    if not user_id:
+        raise APIError(401, "UNAUTHORIZED", "Требуется авторизация")
     if not x_session_id:
         raise APIError(400, "MISSING_SESSION_ID", "X-Session-Id is required")
     merge_guest_cart_into_user(session, user_id, x_session_id)
@@ -150,10 +152,12 @@ def merge_cart(
 @router.get("/api/v1/cart/also_bought")
 def get_also_bought(
     limit: int = Query(default=10, ge=1, le=50),
-    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
     session: Session = Depends(get_session),
 ) -> dict:
-    user_id = require_user_id(None, x_user_id)
+    user_id = user_id_from_authorization(authorization)
+    if not user_id:
+        raise APIError(401, "UNAUTHORIZED", "Требуется авторизация")
     cart_items = get_cart_items(session, user_id, None)
     if not cart_items:
         raise APIError(409, "EMPTY_CART", "Cannot generate recommendations for empty cart")

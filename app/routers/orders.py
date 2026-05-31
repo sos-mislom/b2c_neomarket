@@ -15,8 +15,8 @@ from ..services import (
     checkout_cart,
     mark_order_delivered,
     require_service_key,
-    require_user_id,
     serialize_order,
+    user_id_from_authorization,
 )
 
 
@@ -27,10 +27,12 @@ router = APIRouter(tags=["orders"])
 @router.post("/api/v1/orders/checkout", status_code=status.HTTP_201_CREATED)
 def create_order_from_cart(
     payload: CheckoutRequest,
-    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
     session: Session = Depends(get_session),
 ) -> dict:
-    user_id = require_user_id(None, x_user_id)
+    user_id = user_id_from_authorization(authorization)
+    if not user_id:
+        raise APIError(401, "UNAUTHORIZED", "Требуется авторизация")
     order = checkout_cart(session, user_id, payload.idempotency_key)
     return serialize_order(order)
 
@@ -40,10 +42,12 @@ def list_orders(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     status_filter: OrderStatus | None = Query(default=None, alias="status"),
-    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
     session: Session = Depends(get_session),
 ) -> dict:
-    user_id = require_user_id(None, x_user_id)
+    user_id = user_id_from_authorization(authorization)
+    if not user_id:
+        raise APIError(401, "UNAUTHORIZED", "Требуется авторизация")
     stmt = select(Order).options(selectinload(Order.items)).where(Order.user_id == user_id).order_by(Order.created_at.desc())
     if status_filter is not None:
         stmt = stmt.where(Order.status == status_filter)
@@ -54,10 +58,12 @@ def list_orders(
 @router.get("/api/v1/orders/{order_id}")
 def get_order(
     order_id: str,
-    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
     session: Session = Depends(get_session),
 ) -> dict:
-    user_id = require_user_id(None, x_user_id)
+    user_id = user_id_from_authorization(authorization)
+    if not user_id:
+        raise APIError(401, "UNAUTHORIZED", "Требуется авторизация")
     stmt = select(Order).options(selectinload(Order.items)).where(Order.id == order_id, Order.user_id == user_id)
     order = session.scalar(stmt)
     if order is None:
@@ -69,10 +75,12 @@ def get_order(
 def cancel_existing_order(
     order_id: str,
     payload: CancelOrderRequest,
-    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
     session: Session = Depends(get_session),
 ) -> dict:
-    user_id = require_user_id(None, x_user_id)
+    user_id = user_id_from_authorization(authorization)
+    if not user_id:
+        raise APIError(401, "UNAUTHORIZED", "Требуется авторизация")
     stmt = select(Order).options(selectinload(Order.items)).where(Order.id == order_id, Order.user_id == user_id)
     order = session.scalar(stmt)
     if order is None:
