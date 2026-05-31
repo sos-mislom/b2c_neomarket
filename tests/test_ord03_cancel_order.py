@@ -44,8 +44,8 @@ def test_unreserve_failure_transitions_to_cancel_pending(monkeypatch) -> None:
         )
         order_response = client.post(
             "/api/v1/orders",
-            headers=make_auth_headers(user_id),
-            json={"idempotency_key": "cancel-pending-order"},
+            headers={**make_auth_headers(user_id), "Idempotency-Key": "cancel-pending-order"},
+            json={},
         )
 
         monkeypatch.setenv("B2B_BASE_URL", "http://b2b:8000")

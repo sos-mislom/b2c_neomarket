@@ -28,12 +28,15 @@ router = APIRouter(tags=["orders"])
 def create_order_from_cart(
     payload: CheckoutRequest,
     authorization: str | None = Header(default=None, alias="Authorization"),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     session: Session = Depends(get_session),
 ) -> dict:
     user_id = user_id_from_authorization(authorization)
     if not user_id:
         raise APIError(401, "UNAUTHORIZED", "Требуется авторизация")
-    order = checkout_cart(session, user_id, payload.idempotency_key)
+    if not idempotency_key or not idempotency_key.strip():
+        raise APIError(400, "IDEMPOTENCY_KEY_REQUIRED", "Idempotency-Key header is required")
+    order = checkout_cart(session, user_id, idempotency_key.strip())
     return serialize_order(order)
 
 
