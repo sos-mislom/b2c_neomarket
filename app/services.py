@@ -1391,15 +1391,39 @@ def update_cart_item_quantity(session: Session, item: CartItem, quantity: int) -
     return ensure_cart_item_owner(refreshed, item.user_id, item.session_id)
 
 
-def checkout_cart(session: Session, user_id: str, idempotency_key: str | None = None) -> Order:
-    if idempotency_key:
-        existing_order = session.scalar(
-            select(Order)
-            .options(selectinload(Order.items))
-            .where(Order.user_id == user_id, Order.idempotency_key == idempotency_key)
+def send_b2b_reserve(cart_items: list[CartItem], idempotency_key: str) -> None:
+    settings = get_settings()
+    if not settings.b2b_base_url:
+        return
+
+    payload = {
+        "idempotency_key": idempotency_key,
+        "items": [{"sku_id": item.sku_id, "quantity": item.quantity} for item in cart_items],
+    }
+    try:
+        response = httpx.post(
+            f"{settings.b2b_base_url.rstrip('/')}/api/v1/reserve",
+            json=payload,
+            headers=b2b_headers(),
+            timeout=settings.b2b_timeout_seconds,
         )
-        if existing_order is not None:
-            return existing_order
+    except httpx.RequestError as exc:
+        raise APIError(503, "B2B_UNAVAILABLE", "B2B reserve service is unavailable") from exc
+
+    if response.status_code >= 500:
+        raise APIError(503, "B2B_UNAVAILABLE", "B2B reserve service is unavailable")
+    if response.status_code >= 400:
+        raise APIError(409, "RESERVE_FAILED", "B2B could not reserve cart items")
+
+
+def checkout_cart(session: Session, user_id: str, idempotency_key: str) -> Order:
+    existing_order = session.scalar(
+        select(Order)
+        .options(selectinload(Order.items))
+        .where(Order.user_id == user_id, Order.idempotency_key == idempotency_key)
+    )
+    if existing_order is not None:
+        return existing_order
 
     cart_items = get_cart_items(session, user_id, None)
     if not cart_items:
@@ -1416,6 +1440,8 @@ def checkout_cart(session: Session, user_id: str, idempotency_key: str | None = 
     for item in cart_items:
         locked_sku = locked_skus[item.sku_id]
         validate_sku_for_cart(locked_sku, item.quantity)
+
+    send_b2b_reserve(cart_items, idempotency_key)
 
     now = now_utc()
     order = Order(
@@ -1435,7 +1461,6 @@ def checkout_cart(session: Session, user_id: str, idempotency_key: str | None = 
     for item in cart_items:
         sku = locked_skus[item.sku_id]
         product = sku.product
-        sku.active_quantity -= item.quantity
         line_total = sku.price_cents * item.quantity
         total_amount += line_total
         order.items.append(
@@ -1492,10 +1517,6 @@ def cancel_order(session: Session, order: Order, reason: str | None = None) -> O
         return session.scalar(select(Order).options(selectinload(Order.items)).where(Order.id == order.id))
 
     if not order.reservation_released:
-        sku_ids = [item.sku_id for item in order.items]
-        sku_map = {sku.id: sku for sku in session.scalars(select(Sku).where(Sku.id.in_(sku_ids)).with_for_update()).all()}
-        for item in order.items:
-            sku_map[item.sku_id].active_quantity += item.quantity
         order.reservation_released = True
 
     order.status = OrderStatus.CANCELLED
