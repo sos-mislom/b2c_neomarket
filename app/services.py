@@ -1537,7 +1537,7 @@ def send_b2b_fulfill(order: Order) -> bool:
     }
     try:
         response = httpx.post(
-            f"{settings.b2b_base_url.rstrip('/')}/api/v1/fulfill",
+            f"{settings.b2b_base_url.rstrip('/')}/api/v1/inventory/fulfill",
             json=payload,
             headers=b2b_headers(),
             timeout=settings.b2b_timeout_seconds,
@@ -1551,6 +1551,8 @@ def mark_order_delivered(session: Session, order: Order) -> tuple[Order, bool]:
     if order.status == OrderStatus.DELIVERED:
         refreshed = session.scalar(select(Order).options(selectinload(Order.items)).where(Order.id == order.id))
         return refreshed, False
+    if order.status != OrderStatus.DELIVERING:
+        raise APIError(409, "DELIVERY_STATUS_REQUIRED", "Order must be in delivery before fulfill")
 
     order.status = OrderStatus.DELIVERED
     order.updated_at = now_utc()
