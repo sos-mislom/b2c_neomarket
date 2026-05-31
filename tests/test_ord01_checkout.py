@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.seed import stable_uuid
+from conftest import make_auth_headers
 
 
 def test_checkout_creates_paid_order_with_fixed_prices() -> None:
@@ -13,12 +14,12 @@ def test_checkout_creates_paid_order_with_fixed_prices() -> None:
     with TestClient(app) as client:
         add_response = client.post(
             "/api/v1/cart/items",
-            headers={"X-User-Id": user_id},
+            headers=make_auth_headers(user_id),
             json={"sku_id": sku_id, "quantity": 2},
         )
         response = client.post(
             "/api/v1/orders",
-            headers={"X-User-Id": user_id},
+            headers=make_auth_headers(user_id),
             json={
                 "idempotency_key": "checkout-fixed-prices",
                 "address_id": "addr-checkout",
@@ -47,17 +48,17 @@ def test_idempotency_returns_existing_order() -> None:
     with TestClient(app) as client:
         add_response = client.post(
             "/api/v1/cart/items",
-            headers={"X-User-Id": user_id},
+            headers=make_auth_headers(user_id),
             json={"sku_id": sku_id, "quantity": 1},
         )
         first = client.post(
             "/api/v1/orders",
-            headers={"X-User-Id": user_id},
+            headers=make_auth_headers(user_id),
             json={"idempotency_key": "checkout-idempotent-key"},
         )
         second = client.post(
             "/api/v1/orders",
-            headers={"X-User-Id": user_id},
+            headers=make_auth_headers(user_id),
             json={"idempotency_key": "checkout-idempotent-key"},
         )
 
@@ -65,3 +66,4 @@ def test_idempotency_returns_existing_order() -> None:
     assert first.status_code == 201
     assert second.status_code == 201
     assert second.json()["id"] == first.json()["id"]
+

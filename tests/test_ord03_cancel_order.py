@@ -9,6 +9,7 @@ from app.db import SessionLocal
 from app.main import app
 from app.models import Order, OrderStatus
 from app.seed import stable_uuid
+from conftest import make_auth_headers
 
 
 def test_cancel_paid_order_transitions_to_cancelled() -> None:
@@ -17,7 +18,7 @@ def test_cancel_paid_order_transitions_to_cancelled() -> None:
     with TestClient(app) as client:
         response = client.post(
             f"/api/v1/orders/{order_id}/cancel",
-            headers={"X-User-Id": "11111111-1111-1111-1111-111111111111"},
+            headers=make_auth_headers("11111111-1111-1111-1111-111111111111"),
             json={"reason": "changed_mind"},
         )
 
@@ -38,12 +39,12 @@ def test_unreserve_failure_transitions_to_cancel_pending(monkeypatch) -> None:
     with TestClient(app) as client:
         add_response = client.post(
             "/api/v1/cart/items",
-            headers={"X-User-Id": user_id},
+            headers=make_auth_headers(user_id),
             json={"sku_id": sku_id, "quantity": 1},
         )
         order_response = client.post(
             "/api/v1/orders",
-            headers={"X-User-Id": user_id},
+            headers=make_auth_headers(user_id),
             json={"idempotency_key": "cancel-pending-order"},
         )
 
@@ -53,7 +54,7 @@ def test_unreserve_failure_transitions_to_cancel_pending(monkeypatch) -> None:
         try:
             response = client.post(
                 f"/api/v1/orders/{order_response.json()['id']}/cancel",
-                headers={"X-User-Id": user_id},
+                headers=make_auth_headers(user_id),
                 json={"reason": "changed_mind"},
             )
         finally:
@@ -77,7 +78,7 @@ def test_cancel_assembling_order_returns_409() -> None:
     with TestClient(app) as client:
         response = client.post(
             f"/api/v1/orders/{order_id}/cancel",
-            headers={"X-User-Id": "11111111-1111-1111-1111-111111111111"},
+            headers=make_auth_headers("11111111-1111-1111-1111-111111111111"),
             json={"reason": "too_late"},
         )
 
@@ -91,8 +92,9 @@ def test_other_user_order_returns_404() -> None:
     with TestClient(app) as client:
         response = client.post(
             f"/api/v1/orders/{order_id}/cancel",
-            headers={"X-User-Id": "11111111-1111-1111-1111-111111111111"},
+            headers=make_auth_headers("11111111-1111-1111-1111-111111111111"),
             json={"reason": "not_mine"},
         )
 
     assert response.status_code == 404
+

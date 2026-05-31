@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.seed import stable_uuid
+from conftest import make_auth_headers
 
 
 def test_product_blocked_marks_cart_items_unavailable() -> None:
@@ -13,7 +14,7 @@ def test_product_blocked_marks_cart_items_unavailable() -> None:
     with TestClient(app) as client:
         add_response = client.post(
             "/api/v1/cart/items",
-            headers={"X-User-Id": user_id},
+            headers=make_auth_headers(user_id),
             json={"sku_id": sku_id, "quantity": 1},
         )
         event_response = client.post(
@@ -21,7 +22,7 @@ def test_product_blocked_marks_cart_items_unavailable() -> None:
             headers={"X-Service-Key": "secret-b2c-to-b2b"},
             json={"type": "PRODUCT_BLOCKED", "sku_ids": [sku_id], "idempotency_key": "product-blocked-event-key"},
         )
-        cart_response = client.get("/api/v1/cart", headers={"X-User-Id": user_id})
+        cart_response = client.get("/api/v1/cart", headers=make_auth_headers(user_id))
 
     assert add_response.status_code == 200
     assert event_response.status_code == 200
@@ -38,7 +39,7 @@ def test_protocol_b2b_event_marks_product_skus_unavailable() -> None:
     with TestClient(app) as client:
         add_response = client.post(
             "/api/v1/cart/items",
-            headers={"X-User-Id": user_id},
+            headers=make_auth_headers(user_id),
             json={"sku_id": sku_id, "quantity": 1},
         )
         event_response = client.post(
@@ -51,7 +52,7 @@ def test_protocol_b2b_event_marks_product_skus_unavailable() -> None:
                 "payload": {"product_id": product_id, "reason": "moderation"},
             },
         )
-        cart_response = client.get("/api/v1/cart", headers={"X-User-Id": user_id})
+        cart_response = client.get("/api/v1/cart", headers=make_auth_headers(user_id))
 
     assert add_response.status_code in {200, 201}
     assert event_response.status_code == 202
@@ -67,7 +68,7 @@ def test_orders_not_affected_by_product_blocked() -> None:
     with TestClient(app) as client:
         before_response = client.get(
             f"/api/v1/orders/{order_id}",
-            headers={"X-User-Id": "11111111-1111-1111-1111-111111111111"},
+            headers=make_auth_headers("11111111-1111-1111-1111-111111111111"),
         )
         event_response = client.post(
             "/api/v1/events/product",
@@ -76,7 +77,7 @@ def test_orders_not_affected_by_product_blocked() -> None:
         )
         order_response = client.get(
             f"/api/v1/orders/{order_id}",
-            headers={"X-User-Id": "11111111-1111-1111-1111-111111111111"},
+            headers=make_auth_headers("11111111-1111-1111-1111-111111111111"),
         )
 
     assert event_response.status_code == 200
@@ -89,7 +90,7 @@ def test_idempotent_event_no_side_effects() -> None:
     user_id = "event-idempotent-user"
 
     with TestClient(app) as client:
-        client.post("/api/v1/cart/items", headers={"X-User-Id": user_id}, json={"sku_id": sku_id, "quantity": 1})
+        client.post("/api/v1/cart/items", headers=make_auth_headers(user_id), json={"sku_id": sku_id, "quantity": 1})
         first = client.post(
             "/api/v1/events/product",
             headers={"X-Service-Key": "secret-b2c-to-b2b"},
@@ -113,3 +114,4 @@ def test_missing_service_key_returns_401() -> None:
         )
 
     assert response.status_code == 401
+

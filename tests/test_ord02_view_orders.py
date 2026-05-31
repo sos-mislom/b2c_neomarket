@@ -4,13 +4,14 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.seed import stable_uuid
+from conftest import make_auth_headers
 
 
 def test_orders_list_returns_own_orders_paginated() -> None:
     with TestClient(app) as client:
         response = client.get(
             "/api/v1/orders?limit=1&offset=0&status=DELIVERED",
-            headers={"X-User-Id": "11111111-1111-1111-1111-111111111111"},
+            headers=make_auth_headers("11111111-1111-1111-1111-111111111111"),
         )
 
     assert response.status_code == 200
@@ -30,7 +31,7 @@ def test_order_detail_shows_fixed_prices() -> None:
     with TestClient(app) as client:
         response = client.get(
             f"/api/v1/orders/{order_id}",
-            headers={"X-User-Id": "11111111-1111-1111-1111-111111111111"},
+            headers=make_auth_headers("11111111-1111-1111-1111-111111111111"),
         )
 
     assert response.status_code == 200
@@ -49,7 +50,8 @@ def test_other_user_order_returns_404_not_403() -> None:
     with TestClient(app) as client:
         response = client.get(
             f"/api/v1/orders/{other_order_id}",
-            headers={"X-User-Id": "11111111-1111-1111-1111-111111111111"},
+            headers=make_auth_headers("11111111-1111-1111-1111-111111111111"),
         )
 
     assert response.status_code == 404
+

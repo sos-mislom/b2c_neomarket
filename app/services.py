@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import base64
+import binascii
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -98,10 +100,31 @@ def slugify_characteristic(name: str) -> str:
     return name.lower().replace(" ", "_")
 
 
-def require_cart_identity(x_user_id: str | None, x_session_id: str | None) -> tuple[str | None, str | None]:
-    if not x_user_id and not x_session_id:
-        raise APIError(400, "MISSING_CART_IDENTITY", "Передайте X-User-Id или X-Session-Id")
-    return x_user_id, x_session_id
+def user_id_from_authorization(authorization: str | None) -> str | None:
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise APIError(401, "UNAUTHORIZED", "Authorization must be Bearer JWT")
+    parts = token.split(".")
+    if len(parts) < 2:
+        raise APIError(401, "UNAUTHORIZED", "Invalid JWT")
+    try:
+        payload_part = parts[1] + "=" * ((4 - len(parts[1]) % 4) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(payload_part.encode("ascii")))
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError):
+        raise APIError(401, "UNAUTHORIZED", "Invalid JWT")
+    user_id = payload.get("sub") or payload.get("user_id")
+    if not isinstance(user_id, str) or not user_id:
+        raise APIError(401, "UNAUTHORIZED", "JWT must contain sub claim")
+    return user_id
+
+
+def require_cart_identity(authorization: str | None, x_session_id: str | None) -> tuple[str | None, str | None]:
+    user_id = user_id_from_authorization(authorization)
+    if not user_id and not x_session_id:
+        raise APIError(400, "MISSING_CART_IDENTITY", "Передайте Bearer JWT или X-Session-Id")
+    return user_id, x_session_id
 
 
 def require_user_id(query_user_id: str | None, x_user_id: str | None) -> str:
@@ -825,6 +848,7 @@ def serialize_cart_item(cart_item: CartItem) -> dict:
     unit_price = sku.price_cents if sku else 0
     line_total = unit_price * cart_item.quantity if is_available else 0
     image_url = sku_main_image(sku)
+    image = {"id": image_url or sku.id, "url": image_url or "", "ordering": 0}
     return {
         "item_id": cart_item.id,
         "sku_id": sku.id,
@@ -833,6 +857,7 @@ def serialize_cart_item(cart_item: CartItem) -> dict:
         "product_title": product.title,
         "store_name": product.store.name if product.store else None,
         "sku_name": sku.name,
+        "image": image,
         "image_url": image_url,
         "unit_price": unit_price,
         "quantity": cart_item.quantity,
@@ -1312,11 +1337,11 @@ def validate_sku_for_cart(sku: Sku, quantity: int) -> None:
     if product.is_deleted:
         raise APIError(404, "PRODUCT_NOT_FOUND", "Товар не найден")
     if product.status == ProductStatus.BLOCKED or product.is_blocked:
-        raise APIError(410, "SKU_NOT_AVAILABLE", "Товар недоступен для покупки")
+        raise APIError(404, "SKU_NOT_FOUND", "Товар недоступен для покупки")
     if product.status != ProductStatus.MODERATED:
-        raise APIError(410, "PRODUCT_NOT_AVAILABLE", "Товар недоступен и не может быть обновлён")
+        raise APIError(404, "PRODUCT_NOT_FOUND", "Товар недоступен и не может быть обновлён")
     if not sku.is_active:
-        raise APIError(410, "SKU_NOT_AVAILABLE", "Товар недоступен для покупки")
+        raise APIError(404, "SKU_NOT_FOUND", "Товар недоступен для покупки")
     if quantity > sku.active_quantity:
         raise APIError(422, "INSUFFICIENT_STOCK", f"Нельзя установить {quantity}, доступно только {sku.active_quantity}")
 
