@@ -42,8 +42,14 @@ def test_collection_products_enriched_from_b2b() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["items"]
-    assert "price_from" in payload["items"][0]
-    assert payload["items"][0]["skus"]
+    product = payload["items"][0]
+    assert {"id", "name", "min_price", "has_stock", "images"} <= set(product)
+    assert "title" not in product
+    assert "price_from" not in product
+    assert isinstance(product["min_price"], int)
+    assert isinstance(product["has_stock"], bool)
+    assert isinstance(product["images"], list)
+    assert product["skus"]
 
 
 def test_unavailable_products_in_unavailable_ids() -> None:
