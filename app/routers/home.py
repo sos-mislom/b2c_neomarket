@@ -20,7 +20,6 @@ from ..services import (
     product_is_visible,
     serialize_collection,
     serialize_product_for_catalog,
-    serialize_product_for_cart,
 )
 
 
@@ -161,7 +160,7 @@ def get_collection_products(
     for link in links:
         product = get_product_or_404(session, link.product_id)
         if product_is_visible(product):
-            items.append(serialize_product_for_cart(product))
+            items.append(serialize_product_for_catalog(product))
         else:
             unavailable_ids.append(product.id)
     return {
